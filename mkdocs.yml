@@ -1,1 +1,111 @@
-site_name: My Docs
+site_name: Infrastructure & Cloud Security Study Guide
+site_description: Study material for Infrastructure Security Engineer and Cloud Security Engineer roles
+site_author: Valentin Gostyuzhov
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue grey
+      accent: light blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.share
+
+nav:
+  - Home: index.md
+  - Learning & Career:
+    - learning-career/index.md
+    - Learning Tips: learning-career/learning-tips.md
+    - Interview Tips: learning-career/interview-tips.md
+  - Networking & Protocols:
+    - networking/index.md
+    - Core Networking: networking/core-networking.md
+    - Network Protocols: networking/protocols.md
+    - Network Security & Tools: networking/security-tools.md
+  - Web Application Security:
+    - web-security/index.md
+    - Web Security Fundamentals: web-security/fundamentals.md
+    - Web Vulnerabilities: web-security/vulnerabilities.md
+    - Web Technologies & Tools: web-security/tools.md
+  - Infrastructure & Cloud:
+    - infrastructure-cloud/index.md
+    - Virtualization & Cloud: infrastructure-cloud/virtualization.md
+    - Cloud Security: infrastructure-cloud/cloud-security.md
+    - Container Security: infrastructure-cloud/containers.md
+  - Operating Systems:
+    - operating-systems/index.md
+    - OS Implementation: operating-systems/implementation.md
+    - Platform-Specific: operating-systems/platforms.md
+    - *nix Systems: operating-systems/nix.md
+    - Security Mitigations: operating-systems/mitigations.md
+  - Cryptography & Identity:
+    - crypto-identity/index.md
+    - Cryptographic Fundamentals: crypto-identity/fundamentals.md
+    - Authentication Systems: crypto-identity/authentication.md
+    - Identity Management: crypto-identity/identity.md
+  - Malware & Threats:
+    - malware-threats/index.md
+    - Malware Analysis: malware-threats/analysis.md
+    - Attack Vectors: malware-threats/attack-vectors.md
+    - Attack Lifecycle: malware-threats/lifecycle.md
+  - Threat Modeling:
+    - threat-modeling/index.md
+    - Frameworks: threat-modeling/frameworks.md
+    - Risk Management: threat-modeling/risk-management.md
+  - Detection & Monitoring:
+    - detection-monitoring/index.md
+    - Detection Systems: detection-monitoring/detection-systems.md
+    - Monitoring & Analysis: detection-monitoring/monitoring.md
+  - Digital Forensics:
+    - forensics/index.md
+    - Forensic Fundamentals: forensics/fundamentals.md
+    - Forensic Disciplines: forensics/disciplines.md
+  - Incident Response:
+    - incident-response/index.md
+    - Incident Management: incident-response/management.md
+  - Programming & Technical:
+    - programming/index.md
+    - Coding Fundamentals: programming/fundamentals.md
+    - Security Challenges: programming/challenges.md
+  - Compliance & Governance:
+    - compliance/index.md
+    - Regulatory Frameworks: compliance/frameworks.md
+    - Security Governance: compliance/governance.md
+  - Emerging Technologies:
+    - emerging-tech/index.md
+    - Modern Attacks: emerging-tech/modern-attacks.md
+    - Zero Trust: emerging-tech/zero-trust.md
+    - DevSecOps: emerging-tech/devsecops.md
+
+plugins:
+  - search
+  - tags
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
