@@ -5,18 +5,18 @@ site_author: Valentin Gostyuzhov
 theme:
   name: material
   palette:
-    - scheme: default
-      primary: blue grey
-      accent: light blue
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
     - scheme: slate
-      primary: blue grey
-      accent: light blue
+      primary: deep purple
+      accent: cyan
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
+    - scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
   features:
     - navigation.tabs
     - navigation.sections
