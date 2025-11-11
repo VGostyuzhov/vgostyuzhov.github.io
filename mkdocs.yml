@@ -50,7 +50,7 @@ nav:
     - operating-systems/index.md
     - OS Implementation: operating-systems/implementation.md
     - Platform-Specific: operating-systems/platforms.md
-    - *nix Systems: operating-systems/nix.md
+    - "*nix Systems": operating-systems/nix.md
     - Security Mitigations: operating-systems/mitigations.md
   - Cryptography & Identity:
     - crypto-identity/index.md
