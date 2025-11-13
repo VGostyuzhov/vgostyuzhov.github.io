@@ -46,12 +46,10 @@ nav:
     - Virtualization & Cloud: infrastructure-cloud/virtualization.md
     - Cloud Security: infrastructure-cloud/cloud-security.md
     - Container Security: infrastructure-cloud/containers.md
-  - Operating Systems:
-    - operating-systems/index.md
-    - OS Implementation: operating-systems/implementation.md
-    - Platform-Specific: operating-systems/platforms.md
-    - "*nix Systems": operating-systems/nix.md
-    - Security Mitigations: operating-systems/mitigations.md
+  - Linux OS:
+    - linux/index.md
+    - File Systems: linux/file-system.md
+    - Access Control Systems: linux/access-control-systems.md
   - Cryptography & Identity:
     - crypto-identity/index.md
     - Cryptographic Fundamentals: crypto-identity/fundamentals.md
