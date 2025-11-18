@@ -27,10 +27,6 @@ theme:
 
 nav:
   - Home: index.md
-  - Learning & Career:
-    - learning-career/index.md
-    - Learning Tips: learning-career/learning-tips.md
-    - Interview Tips: learning-career/interview-tips.md
   - Networking & Protocols:
     - networking/index.md
     - Core Networking: networking/core-networking.md
@@ -50,6 +46,17 @@ nav:
     - linux/index.md
     - File Systems: linux/file-system.md
     - Access Control Systems: linux/access-control-systems.md
+    - Kernel & Userspace: linux/kernel-userspace.md
+    - User Management: linux/user-management.md
+    - System Paths: linux/system-paths.md
+    - Process Security: linux/process-security.md
+    - Attack Vectors: linux/attack-vectors.md
+    - Hardening & Compliance: linux/hardening-compliance.md
+    - Authentication: linux/authentication.md
+    - Network Security: linux/network-security.md
+    - Logging & Monitoring: linux/logging-monitoring.md
+    - CLI Tools: linux/cli-tools.md
+    - VM & Container Security: linux/vm-container-sec.md
   - Cryptography & Identity:
     - crypto-identity/index.md
     - Cryptographic Fundamentals: crypto-identity/fundamentals.md

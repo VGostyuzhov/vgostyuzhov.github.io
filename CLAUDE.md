@@ -2,33 +2,17 @@ I want to create an mkdocs site, I'm going to use as study material to prepare f
 
 I want to write concise material to cover all the relevant topics, but which is also expressive and covers the majority of the info I need to learn.
 
-By default I don't need the basics of the topic - just link some good online reading material instead in an "info" note.
+link some good online reading material instead in an "info" note.
 
 * Don't commit CLAUDE.md to the git. 
 * Don't create excessive comments.
 * Don't create all the content. I want to work on it step-by-step and will provide explicit instructions.
+* For every page first create table of contents. Double check what is missing and add this topics. You can add freely, and I will clean it up.
+* Once we have ToC approved by me, you can start filling it with content.
+* Add hands-on examples whenever possible.
+* Add a cheatsheet with commands, flags, learning points, etc
 
 Let's start with organizing the file structure. Here is the first iteration on the list of topics:
-
-## 1. Learning & Career Development
-
-### Learning Tips
-- Learning How To Learn course
-- Track concepts ("To learn", "Revising", "Done")
-- How to review concepts (spaced-repetition, recall)
-- Target your learning
-- Identify what you need to work on
-- Mental health
-
-### Interviewing Tips
-- Interview questions (vague, ask questions, conversation, depth/breadth)
-- Show comprehension (repeat question, clarify)
-- State your assumptions
-- When asked a question you're not sure of
-- Say what you are thinking
-- Reduce cognitive load (notes, pseudocode, tests)
-- Prepare (checklist, questions for interviewer, snacks)
-- Do practice interviews
 
 ## 2. Networking & Protocols
 

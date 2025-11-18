@@ -12,33 +12,31 @@ This is a comprehensive study guide for Infrastructure Security Engineer and Clo
 ## Quick Navigation
 
 ### Core Technical Areas
-- **[Networking & Protocols](networking/)** - Network fundamentals, protocols, and security tools
-- **[Web Application Security](web-security/)** - Web vulnerabilities, OWASP Top 10, and testing
-- **[Infrastructure & Cloud](infrastructure-cloud/)** - Cloud security, containers, and virtualization
-- **[Operating Systems](operating-systems/)** - OS security, privilege escalation, and mitigations
+- **[Networking & Protocols](networking/index.md)** - Network fundamentals, protocols, and security tools
+- **[Web Application Security](web-security/index.md)** - Web vulnerabilities, OWASP Top 10, and testing
+- **[Infrastructure & Cloud](infrastructure-cloud/index.md)** - Cloud security, containers, and virtualization
+- **[Linux OS](linux/index.md)** - Linux security, privilege escalation, and system hardening
 
 ### Security Specializations
-- **[Cryptography & Identity](crypto-identity/)** - Encryption, authentication, and identity management
-- **[Malware & Threats](malware-threats/)** - Malware analysis, attack vectors, and threat lifecycle
-- **[Threat Modeling](threat-modeling/)** - Risk assessment frameworks and methodologies
-- **[Detection & Monitoring](detection-monitoring/)** - SIEM, IDS/IPS, and security monitoring
+- **[Cryptography & Identity](crypto-identity/index.md)** - Encryption, authentication, and identity management
+- **[Malware & Threats](malware-threats/index.md)** - Malware analysis, attack vectors, and threat lifecycle
+- **[Threat Modeling](threat-modeling/index.md)** - Risk assessment frameworks and methodologies
+- **[Detection & Monitoring](detection-monitoring/index.md)** - SIEM, IDS/IPS, and security monitoring
 
 ### Operational Security
-- **[Digital Forensics](forensics/)** - Evidence collection, analysis, and investigation
-- **[Incident Response](incident-response/)** - IR processes, containment, and recovery
-- **[Compliance & Governance](compliance/)** - Regulatory frameworks and security governance
+- **[Digital Forensics](forensics/index.md)** - Evidence collection, analysis, and investigation
+- **[Incident Response](incident-response/index.md)** - IR processes, containment, and recovery
+- **[Compliance & Governance](compliance/index.md)** - Regulatory frameworks and security governance
 
 ### Professional Development
-- **[Learning & Career](learning-career/)** - Study techniques and interview preparation
-- **[Programming & Technical](programming/)** - Security-focused coding and technical challenges
-- **[Emerging Technologies](emerging-tech/)** - Zero Trust, DevSecOps, and modern threats
+- **[Programming & Technical](programming/index.md)** - Security-focused coding and technical challenges
+- **[Emerging Technologies](emerging-tech/index.md)** - Zero Trust, DevSecOps, and modern threats
 
 ## Getting Started
 
-1. Start with **Learning & Career** for study strategies
-2. Build foundational knowledge with **Networking & Protocols**
-3. Progress through technical domains based on your role focus
-4. Use **Programming & Technical** to reinforce concepts with hands-on practice
+1. Start with **Networking & Protocols** for foundational knowledge
+2. Progress through technical domains based on your role focus
+3. Use **Programming & Technical** to reinforce concepts with hands-on practice
 
 ---
 

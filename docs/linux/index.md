@@ -1,142 +1,40 @@
-# *nix Systems Security
+# Linux Operating System Security
 
-Unix-like systems (Linux, Unix, BSD) form the backbone of modern infrastructure. Understanding their security model is essential for infrastructure and cloud security roles.
+This section covers essential Linux security concepts for Infrastructure and Cloud Security Engineers. Topics range from fundamental OS internals to advanced security mechanisms and hardening techniques.
 
-## System Architecture & Security Model
+## Core Linux Security Areas
 
-### Kernel vs Userspace
-- Kernel space privileges and syscalls
-- User space isolation and boundaries
-- Process rings and protection levels
-- System call interface security
+### System Architecture & Internals
+- **[Kernel & Userspace](kernel-userspace.md)** - Understanding the separation between kernel and user space
+- **[File Systems](file-system.md)** - File system security, permissions, and special files
+- **[System Paths](system-paths.md)** - Critical system directories and their security implications
+- **[Process Security](process-security.md)** - Process isolation, capabilities, and security contexts
 
-## Critical System Directories
+### Access Control & Identity
+- **[Access Control Systems](access-control-systems.md)** - DAC, MAC, SELinux, and access control mechanisms
+- **[User Management](user-management.md)** - User accounts, groups, and privilege management
+- **[Authentication](authentication.md)** - Linux authentication mechanisms and security
 
-### Essential System Paths
+### Security Operations
+- **[Attack Vectors](attack-vectors.md)** - Common Linux attack techniques and vulnerabilities
+- **[Hardening & Compliance](hardening-compliance.md)** - System hardening and compliance frameworks
+- **[Network Security](network-security.md)** - Linux network security controls and monitoring
+- **[Logging & Monitoring](logging-monitoring.md)** - Security logging, auditing, and monitoring tools
 
-- `/proc` - Process and kernel information
-- `/sys` - Kernel and hardware interface
-- `/dev` - Device files and special files
-- `/tmp` - Temporary files security concerns
+### Tools & Virtualization
+- **[CLI Tools](cli-tools.md)** - Essential command-line security tools
+- **[VM & Container Security](vm-container-sec.md)** - Virtualization and containerization security
 
-### Security-Critical Files
+## Key Learning Objectives
 
-- `/etc/passwd` and `/etc/shadow`
-- `/etc/sudoers` and sudo configuration
-- System service configurations
-- Log file locations and permissions
+After studying this section, you should understand:
 
-## User and Process Management
+- Linux security architecture and privilege models
+- File system permissions and access controls
+- Process security and isolation mechanisms
+- System hardening techniques and best practices
+- Security monitoring and incident response on Linux systems
+- Container and virtualization security considerations
 
-### User Account Security
-
-- User creation and management
-- Password policies and aging
-- Account lockout mechanisms
-- Service accounts vs user accounts
-
-### Process Security
-
-- Process isolation and sandboxing
-- Resource limits and quotas
-- Process monitoring and auditing
-- Signal handling and IPC security
-
-## Network Security
-
-### Network Stack Security
-
-- Firewall configuration (iptables/netfilter)
-- Network namespaces and isolation
-- Port binding and service exposure
-- Network monitoring and logging
-
-### Service Hardening
-- Service configuration best practices
-- Daemon security and privileges
-- Network service isolation
-- SSL/TLS configuration
-
-## Authentication and Directory Services
-
-### Local Authentication
-- PAM (Pluggable Authentication Modules)
-- Password storage and hashing
-- Multi-factor authentication
-- Key-based authentication
-
-### Directory Integration
-- LDAP integration and security
-- Kerberos authentication
-- Active Directory integration
-- Identity federation
-
-## Logging and Monitoring
-
-### System Logging
-- Syslog architecture and configuration
-- Log rotation and retention
-- Centralized logging solutions
-- Log analysis and SIEM integration
-
-### Security Monitoring
-- File integrity monitoring
-- Process and network monitoring
-- Intrusion detection systems
-- Performance monitoring for security
-
-## Container and Virtualization Security
-
-### Container Security
-- Docker security best practices
-- Container runtime security
-- Image scanning and validation
-- Container isolation mechanisms
-
-### Virtualization Security
-- Hypervisor security considerations
-- VM escape techniques and prevention
-- Resource isolation and allocation
-- Virtual network security
-
-## Hardening and Compliance
-
-### System Hardening
-- Security benchmarks (CIS, STIG)
-- Service minimization
-- Kernel hardening options
-- Security modules and frameworks
-
-### Compliance Requirements
-- Audit trail requirements
-- Access logging and monitoring
-- Configuration management
-- Vulnerability management
-
-## Common Attack Vectors
-
-### Privilege Escalation
-- Local privilege escalation techniques
-- Kernel exploits and mitigations
-- SUID/SGID abuse
-- Container escape techniques
-
-### Persistence Mechanisms
-- Init system abuse
-- Cron job manipulation
-- Library injection
-- Kernel module insertion
-
-## Security Tools and Utilities
-
-### Built-in Security Tools
-- `sudo` and privilege management
-- `chroot` and process isolation
-- `iptables` and network filtering
-- Audit frameworks (`auditd`)
-
-### Third-party Security Tools
-- Configuration management tools
-- Vulnerability scanners
-- Intrusion detection systems
-- Security monitoring solutions
+!!! info "Prerequisites"
+    Basic Linux administration knowledge is assumed. For fundamentals, refer to the [Linux Foundation documentation](https://www.kernel.org/doc/html/latest/) and [Red Hat System Administrator's Guide](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/).
