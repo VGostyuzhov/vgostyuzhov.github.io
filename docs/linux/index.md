@@ -19,11 +19,16 @@ This section covers essential Linux security concepts for Infrastructure and Clo
 - **[Attack Vectors](attack-vectors.md)** - Common Linux attack techniques and vulnerabilities
 - **[Hardening & Compliance](hardening-compliance.md)** - System hardening and compliance frameworks
 - **[Network Security](network-security.md)** - Linux network security controls and monitoring
+- **[Firewalls](firewalls.md)** - `iptables`, `firewalld`, and `ufw`
 - **[Logging & Monitoring](logging-monitoring.md)** - Security logging, auditing, and monitoring tools
 
 ### Tools & Virtualization
 - **[CLI Tools](cli-tools.md)** - Essential command-line security tools
 - **[VM & Container Security](vm-container-sec.md)** - Virtualization and containerization security
+- **[Package Management](package-management.md)** - Secure package management with `apt` and `yum`
+
+### Cryptography
+- **[Encryption](encryption.md)** - Disk and file encryption in Linux
 
 ## Key Learning Objectives
 
@@ -35,6 +40,9 @@ After studying this section, you should understand:
 - System hardening techniques and best practices
 - Security monitoring and incident response on Linux systems
 - Container and virtualization security considerations
+- Firewall configuration and network security
+- Secure package management
+- Encryption at rest
 
 !!! info "Prerequisites"
     Basic Linux administration knowledge is assumed. For fundamentals, refer to the [Linux Foundation documentation](https://www.kernel.org/doc/html/latest/) and [Red Hat System Administrator's Guide](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/).
