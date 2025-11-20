@@ -1,94 +1,33 @@
-# Common Linux Attack Vectors
+# Linux Attack Vectors: A Study Guide
 
-Understanding how attackers compromise Linux systems is essential for building effective defenses. This section covers common techniques used to gain initial access, escalate privileges, and establish persistence.
+This guide provides a structured overview of common attack vectors used against Linux systems. Understanding these techniques is fundamental for designing and implementing robust security controls. The content is organized to support study for security engineering roles, focusing on core concepts and providing resources for further learning.
 
-## Initial Access
+## Basics and Core Concepts
 
-Attackers first need to get a foothold on the system. Common entry points include:
+The process of compromising a Linux system typically follows a sequence of phases: initial access, privilege escalation, and establishing persistence. Each phase employs distinct techniques that exploit vulnerabilities in system configuration, software, or human behavior. A security engineer must be able to identify and mitigate threats at every stage of this attack lifecycle.
 
-- **Exposed Network Services**: Unpatched or misconfigured services (e.g., web servers, databases, SSH) are a primary target. Attackers scan for known vulnerabilities and exploit them to gain remote code execution.
-- **Brute-Force Attacks**: Weak or default credentials on services like SSH or web applications can be easily guessed by automated brute-force tools.
-- **Phishing and Social Engineering**: Tricking a user into running a malicious command or script.
-- **Supply Chain Attacks**: Compromising a software package or container image that is later downloaded and run by the victim.
+**Initial Access** is the first step, where an attacker gains a foothold. This is commonly achieved by exploiting exposed network services with known vulnerabilities, such as an unpatched web server or an open SSH port. Attackers also rely on weak or default credentials, which are susceptible to automated brute-force attacks. Other vectors include phishing, where a user is tricked into executing malicious code, and supply chain attacks, which involve compromising legitimate software packages or container images before they are installed.
 
-## Privilege Escalation
+**Privilege Escalation** follows initial access. Once on a system with limited privileges, an attacker's primary objective is to gain administrative (`root`) access. This is often accomplished by exploiting misconfigured `sudo` rules that grant excessive permissions, or by abusing SUID/SGID executables that run with the privileges of their owner (e.g., `root`). Kernel exploits, though complex, are another powerful method, leveraging vulnerabilities in the Linux kernel itself to elevate privileges.
 
-Once on the system as a low-privileged user, the attacker's next goal is to become `root`.
+**Persistence** is the final phase, ensuring the attacker can maintain access across system reboots or if their initial entry point is discovered. Common methods include installing backdoors like web shells or adding an SSH public key to the `authorized_keys` file. Attackers also create malicious `systemd` services or `cron` jobs to execute their code at boot or on a schedule. Advanced techniques involve using `LD_PRELOAD` to inject malicious libraries into legitimate processes or installing a Loadable Kernel Module (LKM) rootkit, which can hide the attacker's presence from system administrators.
 
-### Misconfigured `sudo` Rules
+### Common Attack Vectors Cheat Sheet
 
-Overly permissive `sudo` rules can allow a user to run privileged commands. For example, if a user can run a command like `find` or `vim` with `sudo`, they can easily leverage it to spawn a root shell.
+| Attack Phase | Technique | Description & Keywords | Mitigation |
+| :--- | :--- | :--- | :--- |
+| **Initial Access** | Exposed Network Services | Exploiting vulnerabilities in services like SSH, HTTP/S, SMB. | Firewall rules, vulnerability scanning, patching. |
+| | Brute-Force Attacks | Guessing weak or default credentials for user accounts. | Strong password policies, `fail2ban`, key-based auth. |
+| | Supply Chain Attack | Compromising a software package or container image. | Image scanning, software signing, trusted registries. |
+| **Privilege Escalation** | `sudo` Misconfiguration | Overly permissive rules allowing command execution. | Principle of Least Privilege (PoLP), specific command rules. |
+| | SUID/SGID Abuse | Exploiting vulnerable executables with elevated permissions. | Remove SUID/SGID bits where not needed, monitor file permissions. |
+| | Kernel Exploit | Leveraging a bug in the kernel for root access. | Regular kernel patching, `unattended-upgrades`. |
+| **Persistence** | SSH Key Addition | Adding attacker's public key to `authorized_keys`. | File Integrity Monitoring (FIM) on `.ssh` directory. |
+| | `systemd`/`cron` Jobs | Scheduling malicious scripts to run at boot or intervals. | Monitor `systemd` unit paths and `cron` directories. |
+| | `LD_PRELOAD` Hijacking | Forcing a process to load a malicious shared library. | Secure environment variables, use SELinux/AppArmor. |
+| | LKM Rootkit | Malicious code loaded into the kernel to hide activity. | Kernel hardening, `rkhunter`, `chkrootkit`, secure boot. |
 
-```bash
-# If 'sudo find' is allowed, an attacker can do this:
-sudo find . -exec /bin/sh \; -quit
-```
-
-### SUID/SGID Abuse
-
-SUID (Set User ID) and SGID (Set Group ID) are special permissions that allow an executable to run with the permissions of the file owner or group, respectively. If a vulnerable program has the SUID bit set and is owned by `root`, an attacker may be able to exploit it to gain root privileges.
-
-```bash
-# Find all SUID executables owned by root
-find / -user root -perm -4000 -print 2>/dev/null
-```
-
-### Kernel Exploits
-
-A vulnerability in the Linux kernel itself can be exploited to escalate privileges from a local user to `root`. These are among the most severe vulnerabilities. Keeping the kernel patched is the primary defense. The `uname -r` command shows the current kernel version.
-
-### Leaked Credentials and Information
-
-- **Readable `/etc/shadow`**: Although rare, if an attacker can read the shadow file, they can attempt to crack the password hashes offline.
-- **Unprotected Backups or Scripts**: Plaintext passwords or sensitive information stored in world-readable backup files or scripts are a common finding.
-
-### Container Escapes
-
-If an attacker gains access to a container, they may try to "escape" to the underlying host system. This is often possible if:
-- The container is run in **privileged mode** (`--privileged`).
-- The Docker socket (`/var/run/docker.sock`) is mounted inside the container.
-- The host's root filesystem is mounted as a volume.
-- A kernel exploit is used to break out of the container's isolation.
-
-## Persistence Mechanisms
-
-After gaining root access, attackers want to ensure they can regain access to the system even if it is rebooted or their initial exploit is patched.
-
-### Backdoors and Web Shells
-
-- **Web Shell**: A malicious script uploaded to a web server that allows the attacker to execute arbitrary commands.
-- **SSH Keys**: Adding the attacker's public key to `~/.ssh/authorized_keys` (especially for the `root` user) provides stealthy and persistent access.
-
-### `systemd` or `init.d` Services
-
-Creating a new `systemd` service or an `init.d` script is a reliable way to run a malicious process at boot time.
-
-```
-# A simple malicious systemd service file
-[Unit]
-Description=System-critical update service
-
-[Service]
-ExecStart=/bin/nc -lp 4444 -e /bin/sh
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Cron Job Manipulation
-
-Attackers can add a new cron job or modify an existing one to execute a malicious script or command on a recurring schedule. Cron jobs can be system-wide (`/etc/crontab`, `/etc/cron.d/`) or user-specific (`crontab -e`).
-
-### Library Injection (`LD_PRELOAD`)
-
-The `LD_PRELOAD` environment variable can be used to force a process to load a malicious shared library. If an attacker can control the environment of a privileged process, they can use `LD_PRELOAD` to inject their code and gain control. This is often used to create a **rootkit**.
-
-### Kernel Module Rootkits
-
-The most advanced and stealthiest form of persistence is a **Loadable Kernel Module (LKM) rootkit**. This involves inserting malicious code directly into the kernel. An LKM rootkit can:
-- Hide processes, files, and network connections.
-- Intercept system calls to manipulate data.
-- Create a hidden backdoor.
-
-Detecting LKM rootkits is very difficult without specialized tools like `rkhunter` or `chkrootkit`.
+!!! info "External Resources for Deep Dive"
+    *   **Payloads All The Things - Linux Privilege Escalation:** [https://github.com/swisskyrepo/PayloadsAllTheThings/blob/master/Methodology%20and%20Resources/Linux%20-%20Privilege%20Escalation.md](https://github.com/swisskyrepo/PayloadsAllTheThings/blob/master/Methodology%20and%20Resources/Linux%20-%20Privilege%20Escalation.md) (A comprehensive repository of Linux privilege escalation techniques and commands).
+    *   **GTFOBins:** [https://gtfobins.github.io/](https://gtfobins.github.io/) (A curated list of Unix binaries that can be used to bypass local security restrictions in misconfigured systems).
+    *   **Linux Kernel Exploitation Series by 0xax:** [https://0xax.gitbooks.io/linux-insides/content/Misc/linux-kernel-exploits.html](https://0xax.gitbooks.io/linux-insides/content/Misc/linux-kernel-exploits.html) (An in-depth, technical resource for understanding the mechanics of kernel-level exploits).
