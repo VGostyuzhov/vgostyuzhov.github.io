@@ -27,9 +27,14 @@ theme:
 
 nav:
   - Home: index.md
+  - Notes: notes.md
+  - Interview Prep:
+    - interview-prep/index.md
+    - Security Questions: interview-prep/questions.md
   - Networking & Protocols:
     - networking/index.md
     - Core Networking: networking/core-networking.md
+    - DNS: networking/dns.md
     - Network Protocols: networking/protocols.md
     - Network Security & Tools: networking/security-tools.md
   - Web Application Security:
@@ -53,7 +58,10 @@ nav:
     - Attack Vectors: linux/attack-vectors.md
     - Hardening & Compliance: linux/hardening-compliance.md
     - Authentication: linux/authentication.md
+    - Encryption: linux/encryption.md
+    - Firewalls: linux/firewalls.md
     - Network Security: linux/network-security.md
+    - Package Management: linux/package-management.md
     - Logging & Monitoring: linux/logging-monitoring.md
     - CLI Tools: linux/cli-tools.md
     - VM & Container Security: linux/vm-container-sec.md
