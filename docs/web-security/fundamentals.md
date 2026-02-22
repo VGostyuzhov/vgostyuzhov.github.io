@@ -412,50 +412,25 @@ Treat any spot where user data meets an interpreter as toxic until you’ve isol
 7. Log with enough granularity: full URI and status for REST, query plus variables hash for GraphQL (watch PII).
 
 ### AuthN & AuthZ Patterns
-**Authentication (AuthN) vs Authorization (AuthZ)**  
-*AuthN* = “Who are you?” — process of proving identity.  
-*AuthZ* = “What can you do?” — process of checking permissions **after** identity is known.
+Authentication (AuthN) proves identity, while Authorization (AuthZ) checks permissions. For a deep dive into protocols and their security threats, see the **[Authentication Section](../authentication/index.md)**.
 
----
-
-**Common AuthN patterns**
-
-| Pattern / Mechanism | Where it’s used | Key strengths | Typical pitfalls |
-|---------------------|-----------------|---------------|------------------|
-| Session cookie + server‑side store | Web apps with browsers | Simple; invalidates on server; supports rotation | CSRF risk; horizontal scaling needs sticky sessions or shared cache |
-| JWT bearer tokens | SPAs, mobile, microservices | Self‑contained claims, stateless | Long TTL = replay window; must validate `aud`, `iss`, `exp`; cannot revoke easily |
-| OAuth 2.0 (authZ framework repurposed for AuthN) | “Login with …” social sign‑in | Delegates identity, MFA possible | Confusion between *auth code* & token; open redirects; PKCE required for public clients |
-| OpenID Connect (OIDC) | Modern SSO (Okta, Auth0, Azure) | Adds identity layer on top of OAuth; interoperable | ID token integrity only as strong as issuer; mis‑configured scopes leak data |
-| SAML 2.0 | Enterprise SSO, legacy federations | Mature, supports signed XML assertions | Verbose XML → signature wrapping attacks; clock skew issues |
-| Mutual TLS (mTLS) | Service‑to‑service inside zero‑trust perimeter | Strong cryptographic identity, channel encryption | Certificate lifecycle & rotation overhead |
-| API Keys | Simple server APIs & IoT | Easy to issue; low overhead | No user context, often hard‑coded, replayable without TLS |
-
----
-
-**Common AuthZ patterns**
-
-| Pattern | Idea in one line | Good for | Watch‑outs |
-|---------|-----------------|----------|------------|
-| Role‑Based Access Control (RBAC) | Assign roles → roles own permissions → users get roles | Org apps, admin panels | Role explosion, coarse granularity |
-| Attribute‑Based Access Control (ABAC) | Policies evaluate user/resource/env **attributes** | Cloud IAM (“allow if tag=dev”) | Harder to audit; complex policy debugging |
-| Permission‑Based / Capability Tokens (PBAC) | Signed token lists exact ops permitted on resource | OAuth `scope`, Macaroons | Need short TTL or revocation list |
-| ReBAC (Relationship‑Based) | Graph defines “who can access what” via edges | Social networks, Google Zanzibar | Requires graph service; latency considerations |
-| ACL (Access‑Control List) | Resource holds list of subjects allowed | File systems, object stores | Scalability; orphaned identities |
-| Guard clauses in code | Check permission inside handler (`if user.id == post.owner_id`) | Simple micro‑services | Easy to miss a path; duplicate logic |
-
----
+**Key Web Patterns:**
+*   **[Sessions & Cookies](../authentication/sessions.md)**: Traditional stateful web auth.
+*   **[JWT (JSON Web Tokens)](../authentication/jwt.md)**: Stateless token-based auth for APIs and SPAs.
+*   **[OAuth 2.0 & OIDC](../authentication/oauth2-oidc.md)**: Modern delegated authorization and identity.
+*   **[mTLS](../authentication/mtls.md)**: Mutual TLS for secure service-to-service communication.
+*   **[WebAuthn](../authentication/webauthn.md)**: Modern, phishing-resistant passwordless authentication.
 
 **Best‑practice cheat‑sheet**
-
-* Prefer **single source of truth**: central IdP (OIDC/SAML) + hierarchy of short‑lived JWT access tokens.  
-* Enforce MFA on the IdP; require **step‑up auth** for sensitive operations.  
-* Pair JWT with **opaque refresh tokens** stored in Secure, HttpOnly, SameSite cookies.  
-* Sign and **also** encrypt tokens crossing untrusted networks; validate every claim (`exp`, `nbf`, `aud`).  
-* Deny‑by‑default in AuthZ: start sealed, then open specific permissions via policy.  
-* Maintain **least‑privilege roles**; schedule automatic role attestation & recertification.  
-* Log every decision: *who*, *what*, *why*, *result* — feed into SIEM for anomaly detection.  
-* Rotate secrets and certs automatically; use short TTLs to shrink blast radius.  
-* Apply defence‑in‑depth: rate limiting, IP/reputation checks, CAPTCHAs, device posture signals.  
+* Prefer **single source of truth**: central IdP (OIDC/SAML) + hierarchy of short‑lived JWT access tokens.
+* Enforce MFA on the IdP; require **step‑up auth** for sensitive operations.
+* Pair JWT with **opaque refresh tokens** stored in Secure, HttpOnly, SameSite cookies.
+* Sign and **also** encrypt tokens crossing untrusted networks; validate every claim (`exp`, `nbf`, `aud`).
+* Deny‑by‑default in AuthZ: start sealed, then open specific permissions via policy.
+* Maintain **least‑privilege roles**; schedule automatic role attestation & recertification.
+* Log every decision: *who*, *what*, *why*, *result* — feed into SIEM for anomaly detection.
+* Rotate secrets and certs automatically; use short TTLs to shrink blast radius.
+* Apply defence‑in‑depth: rate limiting, IP/reputation checks, CAPTCHAs, device posture signals.
 
 Treat identity as the new perimeter: strong AuthN + granular AuthZ = core of modern zero‑trust architecture.
 

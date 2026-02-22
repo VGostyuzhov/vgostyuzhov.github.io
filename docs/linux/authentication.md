@@ -16,34 +16,25 @@
 
 ### Basics and Core Concepts
 
-**LDAP (Lightweight Directory Access Protocol)** is the industry standard for accessing and maintaining distributed directory information services over an IP network. It organizes data in a hierarchical tree structure (Directory Information Tree) using Distinguished Names (DNs) to uniquely identify entries. Standard LDAP traffic (port 389) transmits data in cleartext; therefore, security engineering requires the enforcement of LDAPS (port 636) or StartTLS to encrypt the channel. Common security concerns include LDAP injection attacks and anonymous binding, which should be disabled to prevent unauthorized directory enumeration.
+**LDAP (Lightweight Directory Access Protocol)** is the industry standard for accessing and maintaining distributed directory information services. For a detailed breakdown of LDAP security and threats, see **[Directory Services](../authentication/directory-services.md)**.
 
+**Kerberos** is a network authentication protocol using "tickets" to prove identity. It requires strict time synchronization (NTP) and supports mutual authentication. For a deep dive into Kerberos flows and attacks (like Kerberoasting), see **[Directory Services](../authentication/directory-services.md)**.
 
+**Active Directory (AD)** is Microsoft's directory service utilizing LDAP, Kerberos, and DNS. AD security relies on managing Group Policy Objects (GPO) and monitoring for "Pass-the-Hash" or "Golden Ticket" attacks.
 
-**Kerberos** is a network authentication protocol designed to provide strong authentication for client/server applications by using secret-key cryptography. It relies on a trusted third party, the Key Distribution Center (KDC), which consists of an Authentication Server (AS) and a Ticket Granting Server (TGS). The protocol uses "tickets" to allow nodes communicating over a non-secure network to prove their identity to one another in a secure manner. Crucially, Kerberos requires strict time synchronization (NTP) between clients and servers to prevent replay attacks, and it supports mutual authentication, ensuring both the user and the server verify each other's identity.
-
-
-
-**Active Directory (AD)** is Microsoft's proprietary directory service that utilizes LDAP, Kerberos, and DNS. It organizes network resources into domains, trees, and forests, serving as a central authority for network security and identity management. AD security relies heavily on minimizing the attack surface of Domain Controllers, managing Group Policy Objects (GPO) to enforce security baselines, and monitoring for "Pass-the-Hash" or "Golden Ticket" attacks. Legacy protocol support (such as NTLMv1/v2) is a significant vulnerability in AD environments and should be deprecated in favor of Kerberos enforcement.
-
-**Identity Federation** enables the portability of identity information across distinct security domains, allowing users to use one set of credentials to access data across multiple organizations or applications (Single Sign-On). Common standards include SAML (Security Assertion Markup Language), OIDC (OpenID Connect), and OAuth 2.0. In this model, an Identity Provider (IdP) authenticates the user and issues a token (assertion), which is then consumed and trusted by the Service Provider (SP). Security in federation relies on the trust relationship (PKI/Certificate exchange) between the IdP and SP and the secure handling of assertion tokens to prevent hijacking.
-
-
-
-[Image of SAML authentication flow]
-
+**Identity Federation** enables Single Sign-On (SSO) across distinct security domains using standards like **[SAML](../authentication/saml.md)**, **[OIDC](../authentication/oauth2-oidc.md)**, and OAuth 2.0. Security relies on the trust relationship (PKI/Certificate exchange) between the Identity Provider (IdP) and Service Provider (SP).
 
 ### Summary Cheatsheet
 
 | Concept | Protocol/Port | Key Component | Primary Security Risk |
 | :--- | :--- | :--- | :--- |
-| **LDAP** | TCP 389 / 636 (SSL) | Directory Information Tree (DIT) | Cleartext transmission (Sniffing), Injection |
-| **Kerberos** | TCP/UDP 88 | KDC (AS + TGS) | Time synchronization drift, Golden Tickets |
-| **SSH Keys** | TCP 22 | Pub/Priv Key Pair | Private key theft, weak file permissions |
-| **SAML** | HTTPS 443 | XML Assertions | XML External Entity (XXE), Token replay |
-| **OIDC** | HTTPS 443 | JSON Web Tokens (JWT) | Token leakage, weak signature algorithms |
-| **PAM** | N/A (Local Lib) | `libpam`, Stack Config | Misconfiguration (e.g., `sufficient` flag misuse) |
-| **Hashing** | N/A (Compute) | Salt + Iterations | Insufficient work factor (fast hashes like MD5) |
+| **[LDAP](../authentication/directory-services.md)** | TCP 389 / 636 | Directory Tree (DIT) | Cleartext transmission, Injection |
+| **[Kerberos](../authentication/directory-services.md)** | TCP/UDP 88 | KDC (AS + TGS) | Time drift, Golden Tickets |
+| **SSH Keys** | TCP 22 | Pub/Priv Key Pair | Private key theft, weak permissions |
+| **[SAML](../authentication/saml.md)** | HTTPS 443 | XML Assertions | XML Signature Wrapping, XXE |
+| **[OIDC](../authentication/oauth2-oidc.md)** | HTTPS 443 | JSON Tokens (JWT) | Token leakage, weak signing |
+| **PAM** | N/A (Local Lib) | `libpam`, Stack Config | Flag misuse (e.g., `sufficient`) |
+| **Hashing** | N/A (Compute) | Salt + Iterations | Fast hashes (MD5, SHA-1) |
 
 !!! info "External Resources for Deep Dive"
 

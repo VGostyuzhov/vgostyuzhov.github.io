@@ -18,7 +18,8 @@ This is a comprehensive study guide for Infrastructure Security Engineer and Clo
 - **[Linux OS](linux/index.md)** - Linux security, privilege escalation, and system hardening
 
 ### Security Specializations
-- **[Cryptography & Identity](crypto-identity/index.md)** - Encryption, authentication, and identity management
+- **[Authentication](authentication/index.md)** - Deep dive into modern protocols (OIDC, SAML, JWT, mTLS)
+- **[Cryptography & Identity](crypto-identity/index.md)** - Encryption fundamentals and identity management
 - **[Malware & Threats](malware-threats/index.md)** - Malware analysis, attack vectors, and threat lifecycle
 - **[Threat Modeling](threat-modeling/index.md)** - Risk assessment frameworks and methodologies
 - **[Detection & Monitoring](detection-monitoring/index.md)** - SIEM, IDS/IPS, and security monitoring

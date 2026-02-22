@@ -65,10 +65,18 @@ nav:
     - Logging & Monitoring: linux/logging-monitoring.md
     - CLI Tools: linux/cli-tools.md
     - VM & Container Security: linux/vm-container-sec.md
+  - Authentication:
+    - authentication/index.md
+    - Sessions & Cookies: authentication/sessions.md
+    - JWT: authentication/jwt.md
+    - OAuth 2.0 & OIDC: authentication/oauth2-oidc.md
+    - SAML 2.0: authentication/saml.md
+    - mTLS: authentication/mtls.md
+    - WebAuthn: authentication/webauthn.md
+    - Directory Services: authentication/directory-services.md
   - Cryptography & Identity:
     - crypto-identity/index.md
     - Cryptographic Fundamentals: crypto-identity/fundamentals.md
-    - Authentication Systems: crypto-identity/authentication.md
     - Identity Management: crypto-identity/identity.md
   - Malware & Threats:
     - malware-threats/index.md
