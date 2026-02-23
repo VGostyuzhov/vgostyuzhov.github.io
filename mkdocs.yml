@@ -37,6 +37,7 @@ nav:
     - DNS: networking/dns.md
     - Network Protocols: networking/protocols.md
     - Network Security & Tools: networking/security-tools.md
+    - Network Attacks: networking/attacks.md
   - Web Application Security:
     - web-security/index.md
     - Web Security Fundamentals: web-security/fundamentals.md
@@ -47,6 +48,8 @@ nav:
     - Virtualization & Cloud: infrastructure-cloud/virtualization.md
     - Cloud Security: infrastructure-cloud/cloud-security.md
     - Container Security: infrastructure-cloud/containers.md
+    - Cloud IAM: infrastructure-cloud/iam.md
+    - Secrets Management: infrastructure-cloud/secrets-management.md
   - Linux OS:
     - linux/index.md
     - File Systems: linux/file-system.md
