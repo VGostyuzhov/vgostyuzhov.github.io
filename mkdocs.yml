@@ -33,14 +33,13 @@ nav:
     - Security Questions: interview-prep/questions.md
   - Networking & Protocols:
     - networking/index.md
-    - Core Networking: networking/core-networking.md
     - DNS: networking/dns.md
     - Network Protocols: networking/protocols.md
+    - SSL/TLS: networking/tls.md
     - Network Security & Tools: networking/security-tools.md
     - Network Attacks: networking/attacks.md
   - Web Application Security:
     - web-security/index.md
-    - Web Security Fundamentals: web-security/fundamentals.md
     - Web Vulnerabilities: web-security/vulnerabilities.md
     - Web Technologies & Tools: web-security/tools.md
   - Infrastructure & Cloud:

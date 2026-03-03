@@ -8,7 +8,7 @@
 - Three-way handshake (SYN, SYN-ACK, ACK) establishes session
 - Congestion control (slow start, congestion avoidance) throttles on packet loss
 - Used by: HTTP/S, SSH, SMTP, FTP, database protocols
-- See [Core Networking - TCP vs UDP](core-networking.md#tcp-vs-udp) for detailed comparison
+- See [Core Networking - TCP vs UDP](index.md#tcp-vs-udp) for detailed comparison
 
 **UDP (User Datagram Protocol):**
 
@@ -52,7 +52,7 @@ Overview of major application-layer protocols. Each subsection below covers a pr
 | NTP | 123 | UDP | Time synchronization |
 | Syslog | 514 | UDP (TCP with TLS) | Log forwarding |
 
-For HTTP/HTTPS details, see [Core Networking - HTTP/HTTPS](core-networking.md#httphttps). For DNS, see the dedicated [DNS page](dns.md).
+For HTTP/HTTPS details, see [Core Networking - HTTP/HTTPS](index.md#httphttps). For DNS, see the dedicated [DNS page](dns.md).
 
 !!! info "External Resources"
     - [Application Layer - Cloudflare](https://www.cloudflare.com/learning/ddos/glossary/open-systems-interconnection-model-osi/) (Cloudflare)
@@ -190,53 +190,4 @@ For HTTP/HTTPS details, see [Core Networking - HTTP/HTTPS](core-networking.md#ht
     - [Kerberos Protocol - MIT](https://web.mit.edu/kerberos/) (MIT)
     - [RFC 2865 - RADIUS](https://datatracker.ietf.org/doc/html/rfc2865) (IETF)
 
-## SSL/TLS
-
-SSL (deprecated) and TLS provide confidentiality, integrity, and authentication for network communication. TLS 1.3 is the current standard.
-
-**Version history:**
-
-| Version | Status | Key Changes |
-|---------|--------|-------------|
-| SSL 2.0/3.0 | Deprecated, insecure | Known vulnerabilities (POODLE) |
-| TLS 1.0/1.1 | Deprecated | BEAST, CRIME attacks; removed by modern browsers |
-| TLS 1.2 | Supported | Configurable cipher suites; widely deployed |
-| TLS 1.3 | Current standard | Removed weak ciphers, 1-RTT handshake, mandatory PFS |
-
-**TLS 1.3 handshake (simplified):**
-
-1. **ClientHello** - supported cipher suites, key shares, SNI
-2. **ServerHello** - selected cipher suite, key share, certificate
-3. **Finished** - both sides derive session keys; encrypted communication begins
-
-TLS 1.3 completes in 1 round-trip (down from 2 in TLS 1.2). Supports 0-RTT resumption (with replay risk).
-
-**Certificate validation chain:**
-
-- Server presents certificate signed by Certificate Authority (CA)
-- Client verifies signature chain up to a trusted root CA in its root store
-- Checks: expiry, revocation (OCSP/CRL), hostname match, key usage
-
-**Known TLS attacks:**
-
-| Attack | Target | Mitigation |
-|--------|--------|-----------|
-| POODLE | SSL 3.0 CBC padding | Disable SSL 3.0 |
-| BEAST | TLS 1.0 CBC IV | Upgrade to TLS 1.2+ |
-| CRIME/BREACH | TLS compression / HTTP compression | Disable TLS compression; mitigate BREACH at app level |
-| HEARTBLEED | OpenSSL heartbeat extension | Patch OpenSSL; revoke and reissue certificates |
-| FREAK/Logjam | Export-grade and weak DH ciphers | Disable weak cipher suites |
-| Downgrade | Forces older protocol version | TLS_FALLBACK_SCSV, use TLS 1.3 |
-
-**Best practices:**
-
-- Use TLS 1.3; allow TLS 1.2 as fallback with strong cipher suites only
-- Enable HSTS with `includeSubDomains` and `preload`
-- Use Certificate Transparency (CT) logs to detect mis-issuance
-- Automate certificate management (Let's Encrypt, ACME protocol)
-- Configure OCSP stapling to reduce revocation check latency
-
-!!! info "External Resources"
-    - [SSL/TLS Best Practices - Mozilla](https://wiki.mozilla.org/Security/Server_Side_TLS) (Mozilla)
-    - [Dutch NCSC - TLS Guidelines](https://english.ncsc.nl/publications/publications/2021/january/19/it-security-guidelines-for-transport-layer-security-2.1) (NCSC-NL)
-    - [Qualys SSL Labs - SSL Server Test](https://www.ssllabs.com/ssltest/) (Qualys)
+For SSL/TLS details, see the dedicated [SSL/TLS page](tls.md).

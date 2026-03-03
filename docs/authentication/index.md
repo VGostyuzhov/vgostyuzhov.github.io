@@ -1,40 +1,38 @@
-# Authentication Fundamentals
+# Session-Based Authentication
 
-Authentication (AuthN) is the process of verifying that an entity (user, device, or service) is who they claim to be. It is distinct from Authorization (AuthZ), which determines what an authenticated entity is allowed to do.
+Session-based authentication is the "traditional" method where the server maintains state about the user's logged-in status.
 
-## AuthN vs. AuthZ
+## How it Works
 
-| Concept | Authentication (AuthN) | Authorization (AuthZ) |
-|---------|-----------------------|-----------------------|
-| **Question** | Who are you? | What can you do? |
-| **Evidence** | Credentials (Passwords, Tokens, Certs) | Permissions, Roles, Scopes |
-| **Example** | Logging into an account | Accessing a specific file or API |
+1.  **Login**: User submits credentials to the server.
+2.  **Creation**: Server verifies credentials and creates a session record in a data store (memory, database, or Redis).
+3.  **Delivery**: Server sends a unique **Session ID** back to the client via a `Set-Cookie` header.
+4.  **Persistence**: The browser automatically includes this cookie in every subsequent request to the same domain.
+5.  **Verification**: Server looks up the Session ID in its store to identify the user.
 
-## Factors of Authentication
+## Security Attributes for Cookies
 
-Security is often strengthened by requiring multiple "factors" of authentication (MFA):
+To secure session cookies, specific attributes must be used:
 
-1.  **Something you know**: Password, PIN, Security questions.
-2.  **Something you have**: Security key (YubiKey), TOTP app, SMS code, Smart card.
-3.  **Something you are**: Biometrics (Fingerprint, FaceID, Retina scan).
-4.  **Somewhere you are**: (Contextual) IP-based geofencing, GPS location.
+-   `HttpOnly`: Prevents JavaScript from accessing the cookie (mitigates XSS-based session theft).
+-   `Secure`: Ensures the cookie is only sent over HTTPS.
+-   `SameSite`: (Lax/Strict) Prevents the cookie from being sent in cross-site requests (mitigates CSRF).
+-   `__Host-` Prefix: Hardens the cookie by requiring it to be Secure, have no Domain attribute, and be scoped to the root path.
 
-## Protocol Comparison Matrix
+## Pros and Cons
 
-| Protocol | Primary Use Case | Transport | Data Format |
-|----------|------------------|-----------|-------------|
-| **[Sessions & Cookies](sessions.md)** | Traditional Web Apps | HTTPS | Set-Cookie headers |
-| **[JWT](jwt.md)** | Modern APIs, Microservices | HTTPS Header | JSON (Base64URL) |
-| **[OAuth 2.0 / OIDC](oauth2-oidc.md)** | Modern SSO, Third-party Auth | HTTPS / JSON | JSON / JWT |
-| **[SAML 2.0](saml.md)** | Enterprise SSO | HTTPS / XML | XML Assertions |
-| **[mTLS](mtls.md)** | Service-to-Service (Zero Trust) | TLS Handshake | X.509 Certificates |
-| **[WebAuthn](webauthn.md)** | Passwordless, Phishing-resistant | Browser API | Public Key Crypto |
-| **[Directory Services](directory-services.md)** | Internal Network / Legacy | LDAP / Kerberos | ASN.1 / Binary |
+| Pros | Cons |
+|------|------|
+| **Instant Revocation**: Deleting the session on the server immediately logs the user out. | **Scalability**: Requires a shared session store (like Redis) for multi-node deployments. |
+| **Simplicity**: Most web frameworks handle sessions out-of-the-box. | **CSRF Risk**: Browsers auto-send cookies, making apps vulnerable to CSRF if not properly protected. |
+| **Small Payloads**: Only a small ID is sent, not the full user profile. | **Stateful**: Server must remember every active user. |
 
-## Choosing the Right Protocol
+## Threats and Mitigations
 
-- **Building a standard monolith?** Use **Sessions & Cookies**.
-- **Building a Mobile App or SPA?** Use **OAuth 2.0 + OIDC (PKCE)**.
-- **Securing internal microservices?** Use **mTLS** or **JWT**.
-- **Integrating with an Enterprise IDP (Active Directory)?** Use **SAML** or **OIDC**.
-- **Want to eliminate passwords?** Use **WebAuthn**.
+| Threat | Mitigation |
+|--------|------------|
+| **Session Hijacking (XSS)** | Use `HttpOnly` flag and strong CSP. |
+| **Cross-Site Request Forgery (CSRF)** | Use `SameSite=Lax/Strict` and anti-CSRF tokens. |
+| **Session Fixation** | Regenerate the Session ID immediately after a successful login. |
+| **Man-in-the-Middle (MitM)** | Use `Secure` flag and enforce HSTS. |
+| **Brute Force** | Implement rate limiting on the login endpoint. |
