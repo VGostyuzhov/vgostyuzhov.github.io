@@ -1,29 +1,90 @@
 # VM and Container Security: A Study Guide
 
-This guide covers the security principles for Linux-based virtualization and containerization. While both technologies are used to isolate applications, they have fundamentally different architectures and threat models.
+## Container Security
 
-## Basics and Core Concepts
+### Linux Container Isolation
+Containers are not "real" objects in the Linux kernel; they are a collection of processes isolated using several distinct kernel features.
 
-The primary difference between **Virtual Machines (VMs)** and **containers** lies in their level of isolation and abstraction from the host system. A VM runs a full-blown, independent guest operating system on top of a **hypervisor** (e.g., KVM, Xen). This provides strong isolation because the VM has its own kernel, libraries, and resources, with the hypervisor acting as a strict mediator for hardware access. The main security concern in a virtualized environment is a **VM escape**, a rare but critical vulnerability in the hypervisor itself that could allow an attacker to break out of a guest VM and gain control of the host.
+#### 1. Namespaces
+Namespaces wrap a global system resource in an abstraction that makes it appear to the processes within the namespace that they have their own isolated instance of the resource.
 
-Containers, in contrast, share the host operating system's kernel. A container is essentially an isolated user-space environment, leveraging kernel namespaces and cgroups to provide process and resource isolation. This shared-kernel model makes containers lightweight and fast, but it also creates a larger attack surface. A kernel vulnerability exploited from within a container could compromise the entire host system. Therefore, container security is heavily focused on hardening the host and strictly limiting the container's permissions.
+- **PID:** Isolates process IDs. Processes in a namespace cannot see or signal processes outside.
+- **NET:** Isolates network interfaces, IP addresses, routing tables, and firewall rules.
+- **MNT:** Isolates mount points. A container has its own view of the file system.
+- **UTS:** Isolates hostname and NIS domain name.
+- **IPC:** Isolates Inter-Process Communication (System V IPC, POSIX message queues).
+- **USER:** Isolates user and group IDs. A user can be `root` (UID 0) inside a container but a non-privileged user on the host.
+- **CGROUP:** Isolates the view of control groups.
 
-A critical practice in container security is building secure images. This starts with using **minimal base images** (e.g., Alpine, Distroless) to reduce the attack surface. All container images must be scanned for known vulnerabilities (CVEs) using tools like **Trivy** or **Clair** as part of an automated CI/CD pipeline. Furthermore, running containers with the least privilege is non-negotiable. This includes running the application as a **non-root user** inside the container, dropping all unnecessary Linux capabilities, and mounting the container's filesystem as **read-only** whenever possible.
+#### 2. Control Groups (cgroups)
+While namespaces provide isolation (what you can see), cgroups provide resource management (how much you can use).
 
-Perhaps the most dangerous misconfiguration is running a container in **privileged mode** (`--privileged`) or mounting the Docker socket (`/var/run/docker.sock`) inside it. Both of these practices effectively disable all security isolation between the container and the host, giving a process inside the container `root`-level control over the host system. These configurations should be strictly forbidden in any production environment.
+- **Resource Limiting:** Limits on CPU, memory, I/O, and network bandwidth.
+- **Prioritization:** Giving more CPU/bandwidth to certain containers.
+- **Accounting:** Measuring how many resources a container is using.
+- **Control:** Freezing and restarting groups of processes.
+- **Security Impact:** Prevents "noisy neighbor" attacks and DoS by resource exhaustion.
 
-### VM vs. Container Security Cheat Sheet
+#### 3. Linux Capabilities
+Capabilities break down the power of the `root` user into smaller, distinct privileges. By default, containers should drop as many as possible.
+
+- **CAP_CHOWN:** Make arbitrary changes to file UIDs and GIDs.
+- **CAP_NET_ADMIN:** Perform various network-related operations (e.g., interface config, firewall).
+- **CAP_SYS_ADMIN:** The "new root" - a catch-all for many privileged operations. **Highly dangerous.**
+- **CAP_SYS_PTRACE:** Trace arbitrary processes using `ptrace`.
+
+### Hardening with LSMs and Seccomp
+Standard permissions are often insufficient for container isolation. Mandatory Access Control (MAC) and system call filtering add essential layers.
+
+#### 1. Seccomp (Secure Computing Mode)
+Seccomp allows a process to transition into a state where it cannot make any system calls except for a very limited set (like `read`, `write`, `exit`, `sigreturn`).
+
+- **Seccomp-BPF:** A more flexible version that uses BPF filters to allow/deny syscalls based on arguments.
+- **Default Profiles:** Docker and Kubernetes provide default seccomp profiles that block ~44 dangerous syscalls (e.g., `mount`, `reboot`, `ptrace`).
+
+#### 2. AppArmor and SELinux
+These Linux Security Modules (LSMs) provide fine-grained control over what processes can do.
+
+- **AppArmor:** Path-based MAC. It uses profiles to restrict what files a process can read/write and what capabilities it can use.
+- **SELinux:** Label-based MAC. Every object (file, process, socket) has a security label. Rules define which labels can interact.
+
+### Container Escaping Techniques
+An "escape" occurs when a process inside a container gains access to the host system.
+
+1. **Privileged Containers:** Running with `--privileged` gives the container nearly all host capabilities and access to all devices in `/dev`.
+2. **Docker Socket Mounting:** Mounting `/var/run/docker.sock` allows a container to talk to the Docker daemon and start new, privileged containers.
+3. **Kernel Exploits:** Since containers share the host kernel, any kernel vulnerability (e.g., "Dirty Cow") can be used to escape.
+4. **Misconfigured Mounts:** Mounting sensitive host paths (like `/etc`, `/root`, or `/proc`) can lead to privilege escalation.
+5. **CAP_SYS_ADMIN:** Granting this capability is often enough to perform a mount-based escape or use `nsenter` to enter other namespaces.
+
+## Virtual Machine Security
+
+Virtual Machines run a full guest OS on a hypervisor. In the Linux ecosystem, **KVM** (Kernel-based Virtual Machine) is the primary technology.
+
+### Hypervisors and Isolation
+
+- **KVM:** A kernel module that turns the Linux kernel into a Type 1 hypervisor. It uses hardware extensions (Intel VT-x, AMD-V) to provide isolation.
+- **Hyperjacking:** A theoretical attack where a rogue hypervisor is installed beneath a running OS.
+- **VM Escape:** The most critical threat. An attacker exploits a vulnerability in the hypervisor (or virtualized hardware like QEMU) to break out of the guest and execute code on the host.
+
+### Side-Channel Attacks
+Because VMs share physical hardware (especially CPU caches and branch predictors), they are vulnerable to side-channel attacks.
+
+- **Spectre and Meltdown:** Exploit speculative execution to leak data across process or VM boundaries.
+- **L1 Terminal Fault (L1TF):** Leaks data from the L1 cache.
+- **Mitigation:** Requires kernel patches (e.g., KPTI), microcode updates, and sometimes disabling Hyper-Threading (SMT).
+
+## VM vs. Container Security Cheat Sheet
 
 | Concern | Container Security | VM Security |
 | :--- | :--- | :--- |
 | **Primary Threat** | Kernel exploit leading to host compromise. | VM escape via hypervisor vulnerability. |
-| **Isolation Level** | Weaker (shared kernel). | Stronger (separate guest OS and kernel). |
-| **Key Hardening** | Secure the host, use minimal images, run as non-root, drop capabilities. | Keep hypervisor patched, isolate management network. |
-| **Image Management** | Scan images for CVEs (Trivy, Clair), sign images (Notary). | Use hardened, pre-built OS images ("golden images"). |
-| **Fatal Misconfiguration** | Running in `--privileged` mode; mounting the Docker socket. | Exposing hypervisor management interface to untrusted networks. |
-| **Network Security** | Use container network policies. | Use micro-segmentation and security groups. |
+| **Isolation Level** | Weaker (shared kernel, namespaces). | Stronger (separate guest OS and kernel). |
+| **Resource Control** | cgroups (soft/hard limits). | Hypervisor (strict allocation). |
+| **Key Hardening** | Drop capabilities, Seccomp, AppArmor/SELinux. | Keep hypervisor patched, Secure Boot. |
+| **Fatal Misconfiguration** | `--privileged` mode; mounting Docker socket. | Exposing management interface. |
 
-!!! info "External Resources for Deep Dive"
-    *   **Docker security documentation:** [https://docs.docker.com/engine/security/](https://docs.docker.com/engine/security/) (The official documentation on securing Docker environments).
-    *   **NIST Application Container Security Guide (SP 800-190):** [https://csrc.nist.gov/publications/detail/sp/800-190/final](https://csrc.nist.gov/publications/detail/sp/800-190/final) (A comprehensive guide to container security from the National Institute of Standards and Technology).
-    *   **Trivy Container Vulnerability Scanner:** [https://github.com/aquasecurity/trivy](https://github.com/aquasecurity/trivy) (An open-source tool for scanning container images for known vulnerabilities).
+!!! info "External Resources"
+    *   **Linux Namespaces Man Page:** [https://man7.org/linux/man-pages/man7/namespaces.7.html](https://man7.org/linux/man-pages/man7/namespaces.7.html)
+    *   **KVM Security Overview:** [https://www.linux-kvm.org/page/Security](https://www.linux-kvm.org/page/Security)
+    *   **NSA/CISA Kubernetes Hardening Guide:** [https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)

@@ -67,6 +67,10 @@ nav:
     - Logging & Monitoring: linux/logging-monitoring.md
     - CLI Tools: linux/cli-tools.md
     - VM & Container Security: linux/vm-container-sec.md
+  - Active Directory & Windows:
+    - windows-ad/index.md
+    - Attack Techniques: windows-ad/attacks.md
+    - Defensive Strategies: windows-ad/defenses.md
   - Authentication:
     - authentication/index.md
     - Sessions & Cookies: authentication/sessions.md

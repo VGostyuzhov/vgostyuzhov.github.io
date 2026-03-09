@@ -1,97 +1,29 @@
-# File System Security
+# Linux OS Security
 
-## File Permissions and Ownership
+This section covers the security principles and hardening techniques for the Linux operating system. Linux is the foundation of most cloud infrastructure, containers, and high-security environments. Understanding its internal security model is critical for any security engineer.
 
-File permissions in UNIX-based systems are a form of Discretionary Access Control (DAC). Every file and directory has an owner, an associated group, and permissions are defined for three distinct classes: the User (owner), the Group, and Other (all other users).
+## Core Topics
 
-**Core Permission Types:**
+- **[File System Security](file-system.md)** - Permissions (DAC), special bits (SUID/SGID), and secure mounting.
+- **[Kernel & Userspace](kernel-userspace.md)** - Memory protection, system calls, and the boundary between kernel and user mode.
+- **[Access Control Systems](access-control-systems.md)** - Deep dive into ACLs, and Mandatory Access Control (SELinux, AppArmor).
+- **[User Management](user-management.md)** - UID/GID, sudo configuration, and the principle of least privilege.
+- **[Process Security](process-security.md)** - Process isolation, signals, and monitoring running services.
+- **[Hardening & Compliance](hardening-compliance.md)** - CIS Benchmarks, automated auditing, and system-wide security policies.
+- **[VM & Container Security](vm-container-sec.md)** - Namespaces, cgroups, hypervisors, and isolation technology.
+- **[Network Security](network-security.md)** - Linux network stack hardening, sysctl tuning, and secure protocols.
+- **[Firewalls](firewalls.md)** - Netfilter, iptables, nftables, and frontend tools like UFW/Firewalld.
+- **[Logging & Monitoring](logging-monitoring.md)** - Syslog, journald, auditd, and centralized log analysis.
 
-- **Read `(r)`**: View file contents or list directory contents
-- **Write `(w)`**: Modify/delete files or create/delete files within directory
-- **Execute `(x)`**: Run file as program or traverse into directory
+## Key Learning Objectives
 
-**Permission Management:**
+1.  **Understand the Linux Security Model**: Master the concepts of DAC vs. MAC and how the kernel enforces boundaries.
+2.  **Privilege Management**: Learn how to effectively use `sudo`, capabilities, and user namespaces to minimize risk.
+3.  **System Hardening**: Apply industry-standard benchmarks (CIS, STIG) to secure a Linux distribution from the ground up.
+4.  **Isolation Technologies**: Deep dive into how containers and VMs work at the kernel level to provide security boundaries.
+5.  **Auditing and Visibility**: Configure comprehensive logging and auditing to detect and investigate security incidents.
+6.  **Secure Communication**: Harden the network stack and manage firewall rules to protect services from external threats.
 
-- `chmod` symbolic mode: `chmod u+x file` (adds execute for user)
-- `chmod` octal mode: `chmod 755 file` (rwx for user, r-x for group/other)
-- `chown` and `chgrp` control ownership
-- `umask` sets default permissions for new files
+---
 
-!!! info "External Resources"
-    - [Linux File Ownership and Permissions Guide](https://www.freecodecamp.org/news/file-ownership-permissions-rhel/) (freeCodeCamp)
-    - [Understanding Chown and Chmod](https://www.pythian.com/blog/technical-track/an-overview-of-understanding-chown-and-chmod-in-linux) (Pythian)
-    - [UNIX File Permissions](https://help.rc.unc.edu/how-to-use-unix-and-linux-file-permissions/) (UNC Research Computing)
-
-## Special File Types and Attributes
-
-**Special Permission Bits:**
-
-- **SUID**: Process runs with file owner's privileges (denoted by `s`)
-- **SGID**: Process runs with file group's privileges or inherits directory group
-- **Sticky Bit**: Only file owner can delete files in directory (e.g., `/tmp`)
-
-**Special File Types:**
-
-- **Symbolic Link `l`**: Pointer to another file's path
-- **Block Device `(b)`**: Device that moves data in blocks (e.g., `/dev/sda`)
-- **Character Device `(c)`**: Streams data character by character (e.g., `/dev/tty`)
-- **Socket `(s)`**: Inter-process communication file
-- **Named Pipe/FIFO `(p)`**: One-way IPC between processes
-
-**Extended Attributes:**
-- **Immutable `(i)`**: `chattr +i` makes file unchangeable, even by root
-- **Append-only `(a)`**: `chattr +a` allows only data appending
-
-!!! info "External Resources"
-    - [Setuid, Setgid, and Sticky Bit](https://www.cbtnuggets.com/blog/technology/system-admin/linux-file-permissions-understanding-setuid-setgid-and-the-sticky-bit) (CBT Nuggets)
-    - [chattr and lsattr commands](https://www.geeksforgeeks.org/linux-unix/chattr-command-in-linux-with-examples/) (GeeksforGeeks)
-    - [Special Files in Linux](https://dev.to/naval_upadhyay/special-files-in-linux-the-hidden-power-behind-everything-is-a-file-34j7) (DEV Community)
-
-## Mount Points and Filesystem Options
-
-Mount points attach additional filesystems to the directory hierarchy. Configuration is stored in `/etc/fstab` with critical security mount options:
-
-**Security Mount Options:**
-
-- **nosuid**: Prevents SUID/SGID bits from taking effect
-- **nodev**: Prevents device file interpretation
-- **noexec**: Prevents binary execution
-- **ro**: Read-only mounting
-
-Common secure mounting strategies:
-
-- `/tmp` and `/var/tmp`: `nosuid,nodev,noexec`
-- `/home`: `nosuid,nodev`
-- `/boot`: `ro`
-
-!!! info "External Resources"
-    - [fstab Documentation](https://wiki.archlinux.org/title/Fstab) (ArchWiki)
-    - [Mount Options Explanation](https://serverfault.com/) (Server Fault)
-    - [Mount Points in Linux](https://technogeeks.org/) (Technogeeks)
-
-## File System Hardening Techniques
-
-Filesystem hardening enforces least privilege and reduces attack surface through:
-
-**Partitioning Strategy:**
-
-- Separate partitions for `/home`, `/tmp`, `/var`, `/var/log`
-- Apply restrictive mount options per partition
-- Isolate from root (`/`) filesystem
-
-**Hardening Policy:**
-
-- **Secure Mounts**: Apply security options to appropriate partitions
-- **Strict Permissions**: Restrictive umask (e.g., 027), audit critical files
-- **Attribute Use**: Immutable bit on static config files
-- **Integrity Monitoring**: FIM tools like AIDE or Tripwire
-
-**Compliance Framework:**
-
-- Follow CIS Benchmarks for comprehensive hardening
-- Regular security audits and file integrity checks
-
-!!! info "External Resources"
-    - [CIS Benchmarks FAQ](https://www.cisecurity.org/) (Center for Internet Security)
-    - [Linux Server Hardening Guide](https://www.msp360.com/) (MSP360)
-    - [AIDE Tutorial](https://docs.oracle.com/) (Oracle Linux Docs)
+*For interview preparation related to Linux security, see the [Security Questions](../interview-prep/questions.md) section.*
