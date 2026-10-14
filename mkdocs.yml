@@ -73,6 +73,10 @@ nav:
     - Defensive Strategies: windows-ad/defenses.md
   - Authentication:
     - authentication/index.md
+    - Choosing an Architecture: authentication/comparison.md
+    - Design Patterns: authentication/design-patterns.md
+    - Incident Case Studies: authentication/case-studies.md
+    - Tricky Interview Questions: authentication/interview-questions.md
     - Sessions & Cookies: authentication/sessions.md
     - JWT: authentication/jwt.md
     - OAuth 2.0 & OIDC: authentication/oauth2-oidc.md

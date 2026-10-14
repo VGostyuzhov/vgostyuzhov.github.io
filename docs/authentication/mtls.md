@@ -1,37 +1,47 @@
 # Mutual TLS (mTLS)
 
-Mutual TLS (mTLS) is a method for mutual authentication in which both the client and the server verify each other's identity through X.509 digital certificates.
+Mutual TLS uses certificate-based authentication for both peers in a TLS connection. It is commonly used for service-to-service communication, device identity, and partner APIs. A trusted certificate proves an authenticated identity only after validation and proof of private-key possession; it does not grant every operation.
 
 ## How it Works
 
-In standard TLS, only the server provides a certificate to the client. In mTLS:
+This flow summarizes certificate authentication in TLS 1.3. TLS 1.2 ordering, resumption, and post-handshake authentication differ.
 
-1.  **Client Hello**: Client initiates TLS handshake.
-2.  **Server Hello + Request**: Server provides its certificate and requests the client's certificate.
-3.  **Client Certificate**: Client provides its certificate signed by a trusted Certificate Authority (CA).
-4.  **Verification**: Both parties verify each other's certificates against their trusted CA stores.
-5.  **Secure Channel**: If both are valid, an encrypted and authenticated tunnel is established.
+1. The client starts negotiation. The server sends its negotiated parameters and requests a client certificate when mTLS is required.
+2. The server sends its certificate chain and a CertificateVerify signature proving possession of the corresponding private key, followed by its Finished message.
+3. The client validates the server chain, expected service identity, validity, and applicable key usage/policy, and verifies the handshake proof.
+4. The client supplies its certificate and CertificateVerify proof, followed by Finished. The server validates these against its client-identity trust policy.
+5. The server maps the verified client identity to an authorization policy for the requested service and operation.
 
-## Pros and Cons
+A certificate file by itself is not sufficient to impersonate its owner: the peer must possess the private key. TLS encryption protects the connection, while application authorization still decides resource access.
 
-| Pros | Cons |
-|------|------|
-| **Strong Identity**: Cryptographically proven identity for both sides. | **Complexity**: Managing, issuing, and rotating client certificates is difficult. |
-| **Zero Trust**: Foundation of Zero Trust networking (never trust, always verify). | **Inflexible**: Hard to use with browsers/humans; best for machine-to-machine. |
-| **Tamper-Proof**: Certificates are hard to forge without the private key. | **Revocation**: CRLs and OCSP add latency and complexity to the stack. |
+!!! info "External Resources"
+    - [TLS 1.3 Certificate Authentication](https://www.rfc-editor.org/rfc/rfc8446.html#section-4.4) (IETF)
 
-## Threats and Mitigations
+## Identity and Authorization Boundaries
 
-| Threat | Mitigation |
-|--------|------------|
-| **Private Key Theft** | Use Hardware Security Modules (HSM) or TPMs to store private keys; use short-lived certificates. |
-| **Stale Certificates** | Implement automated certificate rotation (e.g., using SPIFFE/Spire or cert-manager). |
-| **Weak CA Security** | Protect the Root CA and use Intermediate CAs for issuance. |
-| **Cipher Suite Weakness** | Enforce TLS 1.3 and disable weak/legacy ciphers. |
+Trust only the issuing authorities and identities needed for the deployment. Check certificate validity, appropriate Extended Key Usage and policy, and the intended peer identity. The server identity may be a DNS name; a workload identity system may use a URI SAN and its own trust-domain rules.
 
-## Use Cases
+**Example:** Both `orders` and `reporting` have valid certificates from the same organizational CA. An inventory API permits `orders` to update stock and `reporting` to read aggregates. Accepting the `reporting` certificate must not permit stock updates. Trusting a CA is not equivalent to authorizing every identity that CA issues.
 
--   **Microservices**: Securing traffic between services in a service mesh (e.g., Istio, Linkerd).
--   **API Security**: Restricting high-value internal APIs to specific authorized clients.
--   **IoT**: Authenticating large fleets of devices to a central cloud.
--   **B2B Integrations**: Securing data exchange between two corporate networks.
+If a proxy terminates TLS, downstream services authenticate that proxy connection, not automatically the original client. Strip untrusted identity headers and propagate verified client identity only through an authenticated, explicitly trusted mechanism. Document which component makes the authorization decision.
+
+!!! info "External Resources"
+    - [X.509 Certificate and Path Validation](https://www.rfc-editor.org/rfc/rfc5280.html) (IETF)
+    - [SPIFFE X.509-SVID Identity and Validation](https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md) (SPIFFE)
+
+## Certificate Lifecycle and Failure Handling
+
+| Risk | Primary control | Additional considerations |
+|---|---|---|
+| Private-key theft | Restrict key access and use protected key storage where supported | Short certificate lifetimes reduce exposure but do not end it immediately |
+| Expired credentials | Automate issuance/renewal and monitor expiry | Test rotation overlap and failure recovery before outages |
+| Overbroad trust | Restrict trust domains and authorized peer identities | Separate issuing CAs by purpose when appropriate |
+| Compromised issuer | Protect CA keys and maintain an incident response process | Plan trust-bundle replacement and workload reissuance |
+| Revocation uncertainty | Define how validation responds to revocation information | CRL/OCSP use and availability behavior vary by stack; do not assume every verifier checks them |
+| Weak transport settings | Prefer TLS 1.3; support securely configured TLS 1.2 where required | Compatibility policy must be explicit rather than an unqualified version mandate |
+
+mTLS reduces dependence on reusable shared API secrets, but issuance, rotation, authorization mapping, and trust distribution remain operational responsibilities. It is one component of a broader access-control architecture.
+
+!!! info "External Resources"
+    - [Transport Layer Security Guidance](https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html) (OWASP)
+    - [Certificate Revocation and Validation](https://www.rfc-editor.org/rfc/rfc5280.html#section-6) (IETF)
