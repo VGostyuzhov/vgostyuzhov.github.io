@@ -31,6 +31,33 @@ This flow assumes HTTPS and a pre-registered client and redirect URI. Use an est
 5. The provider checks the code, client, redirect URI, and PKCE proof, then issues tokens. This exchange is a **back-channel** server request for a backend client; a SPA performs it from the browser.
 6. The OIDC client validates its ID token, then creates an application session if appropriate. The API independently validates the access token and authorizes operations.
 
+The sequence shows a confidential backend client. Redirects cross the browser front channel; code redemption is a direct backend request. Any failed validation stops the flow before session creation or API access.
+
+```mermaid
+sequenceDiagram
+    accTitle: Backend OIDC authorization code flow with PKCE
+    accDescr: The browser carries redirects and the authorization code. The backend retains the verifier, redeems the code, and validates the ID token. The API separately validates the access token.
+    participant B as Browser
+    participant C as Backend client
+    participant P as OpenID Provider
+    participant A as Resource API
+    B->>C: Start login
+    C->>C: Retain state, nonce, verifier<br/>Derive S256 challenge
+    C-->>B: Redirect to authorization endpoint
+    B->>P: Client ID, redirect URI, scope,<br/>state, challenge, nonce
+    P->>P: Authenticate user and authorize
+    P-->>B: Redirect to registered callback<br/>with code and state
+    B->>C: Callback with code and state
+    C->>C: Check browser transaction and issuer
+    C->>P: Code, verifier, redirect URI<br/>and client authentication
+    P->>P: Validate code binding and PKCE
+    P-->>C: ID token and access token<br/>Refresh token if issued
+    C->>C: Validate ID token, including nonce
+    C-->>B: Establish application session
+    C->>A: Request with access token
+    A->>A: Validate token and authorize action
+```
+
 **Why PKCE works:** The client retains a fresh, unpredictable verifier and sends its S256 challenge, `BASE64URL(SHA256(ASCII(verifier)))`, in the authorization request. The authorization server binds that challenge to the issued code. At redemption, the client supplies the verifier; the server recomputes the challenge and compares it with the stored value. A thief who intercepts only the code and public challenge cannot redeem the code without the verifier; SHA-256 does not make recovery of a suitably random verifier practical. This does not protect a client whose verifier or execution environment is also compromised.
 
 **PKCE policy:** RFC 9700 requires public clients to use PKCE and recommends it for confidential clients. Use S256. PKCE binds the code exchange to the initiating client transaction; it is not client authentication.

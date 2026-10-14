@@ -36,6 +36,27 @@ Use a maintained WebAuthn server library for registration and response validatio
 3. The server validates the ceremony, expected challenge and origin, RP ID hash, credential/account binding, signature, and required UP/UV flags.
 4. Consume the challenge so that the same response cannot establish another login. Create a new application session only after validation succeeds.
 
+For an already registered credential, the authentication ceremony separates browser origin checks, authenticator proof, and server validation. The server holds the credential's public key; the authenticator performs the private-key operation.
+
+```mermaid
+sequenceDiagram
+    accTitle: WebAuthn authentication with a registered credential
+    accDescr: The server supplies a fresh challenge, the browser invokes an authenticator, and the server validates the signed response and consumes the challenge before creating a session.
+    participant S as RP server
+    participant B as Browser
+    participant A as Authenticator
+    B->>S: Request login options
+    S-->>B: Challenge, RP ID,<br/>credential and UV requirements
+    B->>B: Check RP ID eligibility for origin<br/>Build client data
+    B->>A: RP ID, client-data hash,<br/>credential and UV requirements
+    A->>A: Obtain user presence,<br/>perform UV when required
+    A-->>B: Credential ID, authenticator data,<br/>signature over data and client-data hash
+    B->>S: Authentication response and client data
+    S->>S: Validate challenge, origin, RP ID hash,<br/>credential binding, signature and flags
+    S->>S: Consume challenge on success
+    S-->>B: Fresh application session
+```
+
 **RP ID versus origin:** An RP ID is a domain identifier such as `example.com`, not a scheme/host/port triple. The caller could be `https://login.example.com`; the server still needs an explicit expected-origin policy. Browser checks do not replace server verification. Related-origin features require deliberate configuration and supported implementations.
 
 !!! info "External Resources"

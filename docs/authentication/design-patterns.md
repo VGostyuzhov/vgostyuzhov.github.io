@@ -8,11 +8,22 @@ Seven worked designs explain the choice, trust boundaries, alternatives, and fai
 
 **Assumptions:** The process runs on a customer-controlled server, has no interactive user during execution, and can protect a credential or present a supported workload identity. Exports are tenant-scoped and read-only.
 
-```text
-Customer daemon -- application proof --> Authorization server
-Customer daemon <-- scoped access token -- Authorization server
-Customer daemon -- API token ----------> Reports API
-Reports API ---- identity + tenant + permission checks ----> Report data
+```mermaid
+flowchart TD
+    accTitle: Application-only access for a customer daemon
+    accDescr: A customer daemon obtains an API token from the authorization server. The reports API validates the token and enforces tenant and report permissions before returning data.
+    subgraph Customer["Customer-controlled environment"]
+        D["Scheduled daemon"]
+    end
+    subgraph Provider["SaaS environment"]
+        AS["Authorization server"]
+        API["Reports API"]
+        DATA["Tenant report data"]
+    end
+    D -->|"1. Client credentials request and proof"| AS
+    AS -->|"2. Scoped API access token"| D
+    D -->|"3. API request with token"| API
+    API -->|"4. Validate token; authorize tenant and report"| DATA
 ```
 
 **Decision:** Add a dedicated API using an application identity and the client-credentials grant. Register separate customer/integration identities and bind their allowed tenant and actions through server-controlled policy. A browser session remains a different interface for humans.
@@ -47,11 +58,22 @@ Reports API ---- identity + tenant + permission checks ----> Report data
 
 **Assumptions:** The team can operate a backend and route browser API requests through it. Same-origin UI/BFF deployment is feasible; cross-origin deployment would add cookie and CORS considerations.
 
-```text
-Browser -- OIDC redirects via BFF --> Identity provider
-BFF ----- code + PKCE + client proof --> Token endpoint
-Browser -- opaque session cookie -----> BFF
-BFF ----- API access token -----------> Resource API
+```mermaid
+flowchart TD
+    accTitle: Backend for Frontend credential boundaries
+    accDescr: The browser holds a session cookie. The BFF validates the session and CSRF evidence, keeps API tokens in server-side storage, and calls a configured resource API that independently enforces authorization.
+    B["Browser<br/>Opaque session cookie"]
+    P["Identity provider"]
+    subgraph Backend["Application backend boundary"]
+        F["BFF<br/>Session and CSRF validation"]
+        S["Session and API token store"]
+    end
+    A["Resource API<br/>Token validation and authorization"]
+    B <-->|"Login redirects via BFF"| P
+    B <-->|"Session cookie / application responses"| F
+    F <-->|"Code + PKCE + client authentication / tokens"| P
+    F <-->|"Server-side credential lookup"| S
+    F -->|"Access token to configured API"| A
 ```
 
 **Decision:** Use a Backend for Frontend (BFF) as the confidential OAuth/OIDC client and keep access/refresh credentials server-side. The browser receives an opaque, Secure, HttpOnly session cookie. Login request binding, API authorization, and CSRF protections remain mandatory.
@@ -81,11 +103,21 @@ BFF ----- API access token -----------> Resource API
 
 **Assumptions:** Billing must know both the user and the service acting for them. The issuer supports an explicit delegation profile and audience-specific credentials.
 
-```text
-User -- token intended for orders --> Orders
-Orders -- subject token + service authentication + target --> STS
-Orders <-- billing-specific delegated token ---------------- STS
-Orders -- delegated token --> Billing
+```mermaid
+sequenceDiagram
+    accTitle: Audience-specific user delegation
+    accDescr: Orders validates the incoming user token and authenticates to the token service for an exchange. The service issues a billing-specific delegated token under policy. Billing validates both subject and actor authority.
+    participant U as User client
+    participant O as Orders
+    participant S as Token service
+    participant B as Billing
+    U->>O: Token intended for orders
+    O->>O: Validate token and authorize request
+    O->>S: Subject token, service authentication,<br/>requested billing audience
+    S->>S: Validate inputs and apply<br/>delegation and permission policy
+    S-->>O: Billing-specific delegated token
+    O->>B: Request with delegated token
+    B->>B: Validate token, authorize user,<br/>actor, tenant and operation
 ```
 
 **Decision:** Use a supported token-exchange profile when it expresses the required delegation. The Security Token Service (STS) validates the input and the calling service, then applies policy for the downstream audience, permissions, and lifetime. Exchange is not automatic permission narrowing: the issuer must enforce it.
@@ -169,10 +201,22 @@ For a device flow, the tool obtains a device code and user-facing verification i
 
 **Assumptions:** The CI platform issues workload assertions and the cloud provider supports federation. The deployment role is limited to a defined application/environment.
 
-```text
-CI job -- short-lived signed workload assertion --> Cloud STS
-Cloud STS -- verifies issuer, audience, workload conditions --> Temporary role
-CI job -- temporary role credentials --> Deployment API
+```mermaid
+sequenceDiagram
+    accTitle: CI workload federation for deployment
+    accDescr: An eligible CI job obtains a workload assertion. Cloud STS validates its issuer, audience and workload conditions before issuing temporary role credentials, which the deployment API authorizes separately.
+    participant J as CI job
+    participant I as CI identity provider
+    participant S as Cloud STS
+    participant A as Deployment API
+    J->>I: Request workload assertion
+    I->>I: Check job eligibility
+    I-->>J: Signed assertion with workload context
+    J->>S: Present assertion for role assumption
+    S->>S: Validate issuer, signature, audience<br/>and permitted workload conditions
+    S-->>J: Temporary role credentials
+    J->>A: Deployment request with role credentials
+    A->>A: Enforce role and resource policy
 ```
 
 **Decision:** Configure a narrowly scoped trust relationship and temporary deployment role. The job's right to request an assertion is not itself cloud authorization; the cloud trust policy decides which assertion is acceptable.

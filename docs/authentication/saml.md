@@ -12,6 +12,26 @@ In an **SP-initiated** browser SSO flow:
 4. The SP's SAML library validates the response and assertion against its trust and request context.
 5. The SP maps the validated identity to a local account, applies authorization, and establishes a fresh local session.
 
+```mermaid
+sequenceDiagram
+    accTitle: SP-initiated SAML browser SSO
+    accDescr: The browser relays the authentication request and response between the service provider and identity provider. The service provider validates trusted signed content and request correlation before establishing a local session.
+    participant B as Browser
+    participant S as Service Provider
+    participant I as Identity Provider
+    B->>S: Start SSO
+    S->>S: Retain request ID and browser context
+    S-->>B: Redirect with AuthnRequest
+    B->>I: Deliver AuthnRequest
+    I->>I: Authenticate user
+    I-->>B: Form carrying SAML response
+    B->>S: POST response to ACS
+    S->>S: Validate signed content, issuer,<br/>audience, recipient and time
+    S->>S: Check request/browser binding<br/>and replay protection
+    S->>S: Map identity and apply authorization
+    S-->>B: Fresh local session
+```
+
 **IdP-initiated** SSO has no preceding SP request to correlate. Enable it only deliberately, with profile-specific handling of unsolicited responses, replay protection, and login CSRF risk. Do not accept a missing `InResponseTo` as a fallback for a failed SP-initiated flow.
 
 !!! info "External Resources"

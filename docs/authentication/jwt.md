@@ -32,6 +32,21 @@ A valid signature is one check in the acceptance process. Configure the expected
 5. Distinguish token types and purposes, including ID tokens and API access tokens. Validate the subject in its issuer context.
 6. Apply authorization to the resource and action, including tenant membership and current policy. Trusted claims do not automatically grant access.
 
+```mermaid
+flowchart TD
+    accTitle: JWT acceptance and authorization gates
+    accDescr: Untrusted input must pass cryptographic and claims validation under configured policy before a separate resource authorization decision. Any failed gate denies access.
+    T["Untrusted JWT"] --> C{"Trusted key context,<br/>allowed algorithm,<br/>valid cryptographic proof?"}
+    P["Configured issuer, keys,<br/>algorithms and token profile"] -.-> C
+    C -->|No| R["Reject token"]
+    C -->|Yes| V{"Required claims, issuer,<br/>audience, time and purpose valid?"}
+    P -.-> V
+    V -->|No| R
+    V -->|Yes| A{"Subject, tenant, resource<br/>and action permitted by policy?"}
+    A -->|No| D["Deny operation"]
+    A -->|Yes| OK["Allow operation"]
+```
+
 **Example:** An API expects issuer `https://id.example` and audience `orders-api`. A correctly signed token with `aud: billing-api` must be rejected. Decoding its JSON or successfully verifying its signature cannot change that result.
 
 !!! info "External Resources"

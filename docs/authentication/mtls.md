@@ -12,6 +12,22 @@ This flow summarizes certificate authentication in TLS 1.3. TLS 1.2 ordering, re
 4. The client supplies its certificate and CertificateVerify proof, followed by Finished. The server validates these against its client-identity trust policy.
 5. The server maps the verified client identity to an authorization policy for the requested service and operation.
 
+```mermaid
+sequenceDiagram
+    accTitle: TLS 1.3 mutual certificate authentication
+    accDescr: The client validates the server certificate and handshake proof, the server validates the client certificate and proof. Application authorization follows successful TLS authentication. The diagram omits key derivation and record-layer details.
+    participant C as Client
+    participant S as Server
+    C->>S: ClientHello
+    S-->>C: ServerHello, EncryptedExtensions,<br/>CertificateRequest
+    S-->>C: Certificate, CertificateVerify, Finished
+    C->>C: Validate server identity,<br/>certificate chain and handshake proof
+    C->>S: Certificate, CertificateVerify, Finished
+    S->>S: Validate client identity,<br/>certificate chain and handshake proof
+    C->>S: Protected application request
+    S->>S: Authorize client for operation
+```
+
 A certificate file by itself is not sufficient to impersonate its owner: the peer must possess the private key. TLS encryption protects the connection, while application authorization still decides resource access.
 
 !!! info "External Resources"

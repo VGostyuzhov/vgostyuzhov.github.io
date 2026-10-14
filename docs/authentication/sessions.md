@@ -10,6 +10,28 @@ A server-side session associates an unpredictable identifier with authenticated 
 4. The browser sends the cookie only on requests matching its scope and browser policy.
 5. The server checks that the session exists, is unexpired and unrevoked, then authorizes the requested action separately.
 
+```mermaid
+sequenceDiagram
+    accTitle: Server-side session creation and lookup
+    accDescr: After authentication the application creates a fresh session record and sends its opaque identifier to the browser. Each later request requires a valid server record and a separate authorization decision.
+    participant B as Browser
+    participant A as Application
+    participant S as Session store
+    B->>A: Login over HTTPS
+    A->>A: Verify authentication
+    A->>S: Create fresh session,<br/>invalidate pre-login identifier
+    A-->>B: Set-Cookie with opaque identifier
+    B->>A: Request with session cookie
+    A->>S: Look up session and validity
+    S-->>A: Session state or invalid result
+    alt Missing, expired, or revoked
+        A-->>B: Reject authentication
+    else Valid session
+        A->>A: Apply CSRF checks where required,<br/>authorize resource and action
+        A-->>B: Authorized result or access denied
+    end
+```
+
 A conceptual exchange uses a placeholder identifier; production values must be unpredictable and sufficiently long. OWASP recommends at least 64 bits of entropy; framework defaults or at least 128 random bits provide a practical margin for a custom identifier.
 
 ```http
