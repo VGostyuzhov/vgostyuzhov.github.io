@@ -70,6 +70,19 @@ For cookie-authenticated state changes, use the framework's CSRF protection: a s
     - [CSRF Prevention and SameSite Limitations](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html) (OWASP)
     - [Cookie Isolation Limits](https://www.rfc-editor.org/rfc/rfc6265.html#section-8.5) (IETF)
 
+### Why CSRF Tokens Help
+
+In **cross-site request forgery (CSRF)**, an attacker causes a browser to submit an unwanted request carrying the victim's automatically attached credentials. Cookie possession tells the server which session made the request; it does not tell the server that trusted application code or the user intended the action.
+
+A **synchronizer token** is an unpredictable value associated with the server session. The application delivers it to its own page and requires it in a form field or explicit request header for state changes. A foreign origin cannot normally read the page to learn this value. The server rejects a missing or mismatched token even if the session cookie is valid.
+
+A **signed, session-bound double-submit token** instead lets the server verify a submitted value against a cookie and a cryptographic binding to the session. Simply checking equality of two attacker-injectable values is insufficient. Use the framework's implementation and protect the signing secret.
+
+For example, `uploads.example.com` and `app.example.com` over HTTPS are different origins but may be the same site. A request initiated by untrusted uploads content may therefore carry the application's SameSite cookie. The application still requires the independent CSRF evidence. Same-origin XSS can often obtain that evidence and send requests; CSRF protection cannot repair script execution inside the trusted application.
+
+!!! info "External Resources"
+    - [Synchronizer Tokens and Signed Double-Submit Cookies](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html) (OWASP)
+
 ## Expiry, Rotation, and Revocation
 
 Enforce expiry on the server; deleting a browser cookie is insufficient to revoke a stolen identifier.
@@ -80,6 +93,11 @@ Enforce expiry on the server; deleting a browser cookie is insufficient to revok
 - **Logout and compromise:** Invalidate the server record and clear the cookie with matching scope. Provide account-wide session revocation when required.
 - **Sensitive actions:** Require recent or stronger authentication for credential changes, recovery, or high-impact operations.
 - **Multiple servers:** Use shared or consistently replicated state, or a documented routing strategy. Revocation latency depends on caches, replicas, and ongoing requests.
+
+**Timeout example:** A session starts at 09:00 with an illustrative 30-minute idle timeout and eight-hour absolute limit. A qualifying request at 09:20 moves the idle deadline to 09:50. No further activity means the next request at 09:51 fails. Continuous activity still cannot extend the session beyond 17:00. Define qualifying activity server-side: automatic polling should not accidentally keep a sensitive session alive forever. A copied cookie can also generate activity, so idle expiry alone does not reliably bound theft.
+
+Cookie `Max-Age`/`Expires` controls browser retention; server-side timeout controls acceptance. Closing a browser or deleting its cookie does not invalidate another copy. See [token and session clocks](oauth2-oidc.md#independent-lifetime-policies) when a session also holds OAuth grants.
+
 
 **Failure example:** An attacker sets a known pre-login identifier in a victim's browser. If login retains it, the attacker can reuse it. Issuing a fresh identifier and invalidating the old one removes this fixation path; it does not prevent later theft of the new identifier.
 

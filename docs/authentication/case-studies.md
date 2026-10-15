@@ -16,6 +16,8 @@ Required origin-bound authenticator proof unavailable
 
 **Design analysis:** The decisive property was not simply the number of factors. A reusable code can be relayed in real time; an authenticator scoped to the legitimate relying party resists signing for an unrelated phishing origin. The receiving service must still validate the ceremony and expected origin correctly. This case does not demonstrate protection against every endpoint compromise, recovery attack, or theft of a session created after authentication.
 
+**Credential and recipient:** The target login service required an authenticator proof for its own relying-party context. The stolen password alone could not satisfy that ceremony. This successful boundary applies to login; a later application session is a separate credential. See [the WebAuthn phishing example](webauthn.md#registration-and-authentication).
+
 **Practice prompt:** “Our workforce uses passwords plus one-time codes. What would you change, and what remains at risk?”
 
 A strong answer proposes phishing-resistant authentication, secure enrollment/recovery, consistent enforcement across applications, and a session-theft response. It avoids blaming users or claiming that employee training makes a phishing-resistant protocol unnecessary.
@@ -38,6 +40,8 @@ Credential stolen --> API accepts permitted token use
 ```
 
 **Design analysis:** Strong interactive login does not force a fresh login for every use of an issued integration credential. Its effective scope, audience, accessible repositories, storage, and lifecycle determine exposure. Using a standards-based delegation protocol does not make the integration provider's credential storage trustworthy.
+
+**Credential and recipient:** The repository API accepted an already issued integration token. The attacker reused existing delegated authority rather than proving the user's password again. Short access-token expiry can reduce exposure, but a stolen usable refresh grant can issue replacements; see [refresh mechanics](oauth2-oidc.md#refresh-exchange-and-reuse-detection) and [lifetime selection](oauth2-oidc.md#selecting-lifetimes). These are design considerations, not claims about which token format or refresh policy the incident used.
 
 **Practice prompt:** “A build integration needs repository access. How would you limit damage if that integration is compromised?”
 
@@ -62,6 +66,8 @@ Attacker reuses session without repeating original login
 ```
 
 **Design analysis:** Authentication strength and session handling are separate controls. Moving credential-bearing diagnostics into a support platform can create a new trust boundary. Existing session authority may be usable without repeating the original authenticator ceremony.
+
+**Credential and recipient:** An administrative service accepted session material representing an earlier successful authentication. Copying that material could avoid a new authenticator ceremony. Containment therefore needs to invalidate the state accepted by that service and inspect other authority created or retained by the attacker. See [session invalidation](sessions.md#expiry-rotation-and-revocation) and [logout scopes](oauth2-oidc.md#revocation-and-current-authorization).
 
 **Practice prompt:** “Support needs a browser trace to debug SSO. What must the diagnostic workflow protect?”
 

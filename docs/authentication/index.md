@@ -4,12 +4,30 @@ Authentication establishes an identity; authorization decides which operations t
 
 Study sessions, JWT, and OAuth/OIDC first. Then compare SAML federation and WebAuthn user authentication. Study mTLS and directory services for service and enterprise environments. For browser origin rules and injection risks, see [Web Security Fundamentals](../web-security/index.md).
 
+## Follow One Account Through the System
+
+A **principal** is an identity to which a system assigns authority, such as a user or service. A **credential** supplies evidence used to authenticate that principal. An **issuer** creates a credential or assertion; a **recipient** validates it. A **trust boundary** separates components or parties whose statements are not accepted without checks.
+
+Consider a browser user viewing an invoice:
+
+1. The user proves control of an authenticator to an identity provider. The login method might be a password or WebAuthn credential.
+2. The provider issues an OIDC ID token to the application. Its **claims** are named assertions, such as the issuing provider and authenticated subject. The application validates them rather than treating browser-delivered data as trusted.
+3. The application creates a local session and gives the browser its session cookie. Later requests present that cookie instead of repeating the original authentication.
+4. If a separate invoice API is involved, the backend presents an access token intended for that API. The API validates that credential independently.
+5. The API checks whether the principal may read this particular invoice in this tenant. Login and a general read scope do not establish invoice ownership.
+6. Session expiry, token refresh, permission changes, and logout affect different state. Ending one credential does not necessarily end all the others.
+
+The same user appears in several components, but each recipient accepts a particular kind of evidence for a particular purpose. The protocol pages explain those checks; the design pages show how to combine them.
+
+!!! info "External Resources"
+    - [Authentication and Session Management](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html) (OWASP)
+
 ## Architecture and Interview Practice
 
 - **[Choosing an Authentication Architecture](comparison.md):** Compare caller types, protocols, client proofs, token formats, and revocation tradeoffs; practice explaining what to use when.
 - **[Authentication Design Patterns](design-patterns.md):** Seven worked designs covering external machine clients, browser BFFs, service delegation, CLIs, enterprise SSO, CI workloads, and sensitive operations.
 - **[Authentication Incident Case Studies](case-studies.md):** Analyze phishing-resistant login, stolen integration tokens, and exposed administrative sessions using primary incident accounts.
-- **[Tricky Interview Questions](interview-questions.md):** Fifteen authentication/authorization scenarios with hidden answer guidance, common traps, tests, and follow-ups.
+- **[Tricky Interview Questions](interview-questions.md):** Nineteen authentication/authorization scenarios with hidden answer guidance, common traps, tests, and follow-ups.
 
 ## Core Topics
 

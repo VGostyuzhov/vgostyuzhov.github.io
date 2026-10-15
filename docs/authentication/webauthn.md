@@ -2,6 +2,15 @@
 
 WebAuthn is a browser API for registering and using public-key credentials scoped to a relying party (RP). FIDO2 combines WebAuthn with authenticator communication protocols. Passkeys can be device-bound or synchronized across devices; WebAuthn does not require every credential to remain in a hardware security module.
 
+## Participants and Stored State
+
+The **relying party (RP)** is the application accepting authentication. The browser mediates between that application's origin and an **authenticator**, such as a security key or platform credential provider. Registration stores a credential ID and public key with the RP account; the authenticator/provider retains the corresponding private-key capability. Later login proves control of that capability without sending the private key to the website.
+
+A **challenge** is a fresh unpredictable server value bound to an interaction and validity period. The signed response includes evidence for that challenge, so a response captured during yesterday's login cannot satisfy today's different challenge. The server checks the expected value, then consumes the interaction atomically to prevent the same response from establishing multiple logins. Challenge freshness does not authorize an account change or fix enrollment into the wrong account.
+
+!!! info "External Resources"
+    - [WebAuthn Relying Parties and Authentication](https://www.w3.org/TR/webauthn-3/#sctn-verifying-assertion) (W3C)
+
 ## Credential and Authenticator Types
 
 | Concept | Meaning | Security implication |
@@ -63,6 +72,13 @@ sequenceDiagram
     - [WebAuthn Registration Verification](https://www.w3.org/TR/webauthn-3/#sctn-registering-a-new-credential) (W3C)
     - [WebAuthn Assertion Verification](https://www.w3.org/TR/webauthn-3/#sctn-verifying-assertion) (W3C)
 
+**Phishing example:** A credential is registered for RP ID `example.com` and the RP accepts origin `https://login.example.com`. A page at `https://example-login.attacker.test` cannot normally request use of that credential for `example.com`: its origin is not eligible for that RP ID. Relaying a challenge does not remove the browser-origin and server verification requirements. Compromise of a permitted origin or the client's execution environment is a different threat.
+
+**What the proof binds:** The authentication signature covers authenticator data and the hash of client data. Together they bind the RP ID hash, presence/verification flags, challenge, origin, and ceremony type. The server must verify those fields as well as the signature; otherwise a cryptographically valid response can be accepted in the wrong context.
+
+**Attestation versus authentication:** Attestation at registration can provide evidence about an authenticator's provenance or properties under an accepted trust policy. The normal login signature proves control of the registered credential. A valid signature does not independently establish hardware certification, and attestation may be unavailable or intentionally omitted for privacy.
+
+
 ## Threats, Recovery, and Policy
 
 | Scenario | Required reasoning |
@@ -73,6 +89,9 @@ sequenceDiagram
 | Lost device or synchronization account | Support additional credentials and a carefully verified recovery process |
 | Attestation | Can inform an authenticator policy; attestation availability and trust must be evaluated, not assumed |
 | Signature counter | Use as an implementation-dependent signal; synchronized credentials may not support a simple strictly increasing-counter policy |
+
+**Presence versus verification example:** Touching a security key can show user presence (UP). Entering its PIN or satisfying a local biometric check can additionally establish user verification (UV). If policy requires UV for an administrator login, a touch-only response is insufficient. The RP checks the returned signed UV flag; it does not receive the PIN or biometric.
+
 
 **Failure example:** A signature verifies, but the server required UV and the returned UV flag is absent. Reject the login rather than treating the user's touch as equivalent to PIN/biometric verification.
 

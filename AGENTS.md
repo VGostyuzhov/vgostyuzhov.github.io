@@ -19,7 +19,7 @@ Two styles coexist. Choose based on topic type.
 
 For **reference pages** - topics with well-defined terms, commands, or configurations.
 
-- Short intro sentence per section
+- Short introduction per section; use this style when the reader needs reference facts rather than a new mechanism
 - Bold key terms with brief inline explanation
 - Bulleted lists and short code snippets
 - Add relevant sources according to External Resources Rules below
@@ -44,7 +44,7 @@ For **concept pages** - topics requiring attack/defense analysis, protocol flows
 | Content fits naturally in bullet + bold-term format | Concise |
 | Content needs tables, attack scenarios, or multi-step flows | Detailed |
 
-Most pages will blend both - concise bullets for definitions, tables for comparisons. That is fine. The reference examples show the range.
+Most pages will blend both - concise bullets for definitions, explanations for mechanisms, and tables for comparisons. Choose detailed style for unfamiliar mechanisms, lifecycle decisions, trust boundaries, and attack reasoning even when the terminology could fit in a short table. The reference examples show the range.
 
 ## Page Structure Template
 
@@ -73,6 +73,8 @@ Short intro paragraph explaining the concept.
 
 ...
 ```
+
+For concept sections, a useful sequence is: problem and prerequisites, participants and mechanism, concrete example, failure cases and limits, then an optional summary table. This sequence is guidance, not a mandatory set of headings.
 
 Not every page needs every element. Adapt the skeleton to fit the content. The example links illustrate formatting, not a required link count; follow External Resources Rules below.
 
@@ -141,13 +143,27 @@ Standard Markdown tables. Use them for comparisons, attack/defense mappings, and
 
 ## Tone and Style
 
-- Professional, academic, dry, technical
-- Write like lecture notes or a cheatsheet, not a blog post
+- Professional, clear, and technically precise
+- Write explanatory study material for learners, with concise reference summaries where useful
 - No emojis
 - No metaphors or analogies
 - No filler phrases ("it's important to note that", "in today's landscape")
 - Use precise security terminology
 - Keep explanations direct - state what something is, what it does, why it matters
+
+## Explanation Quality
+
+Reader understanding takes priority over brevity. Concise style is suitable for reference facts, not a reason to compress an unfamiliar mechanism into a list of control names. The page template is a layout example, not a limit on explanatory depth.
+
+- Define a technical term or acronym on first meaningful use. Explain what it does in this scenario; expanding the acronym alone is insufficient.
+- State prerequisites and link to a specific teaching section when needed. External resources supplement the lesson; readers should not need to leave the site to understand its central explanation.
+- For a nontrivial protocol or control, explain the actors, information exchanged, state retained, checks performed, and result of failure. Explain why the control addresses the threat and what it leaves unresolved.
+- Introduce mechanisms in prose or a worked flow before using tables and checklists to summarize or compare them. Avoid sentences that introduce several unexplained alternatives at once.
+- Use concrete examples to explain timing, caching, trust boundaries, and attack/defense behavior. State assumptions and trace cause and effect; distinguish illustrative numbers from standards and defaults.
+- Avoid using phrases such as "apply appropriate policy" or "use sufficiently fresh evidence" as substitutes for explaining the actual decision, checks, and timing bound.
+- Interview guidance must be supported by teaching material. Add specific study links, and fill prerequisite gaps rather than teaching the entire concept only inside a hidden answer.
+- Review concept pages for a learner who knows the stated prerequisites but has not encountered the topic. The reader should be able to explain how and why the mechanism works, not only repeat its terminology.
+
 
 ## Technical Accuracy
 

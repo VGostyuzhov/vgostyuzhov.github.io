@@ -62,6 +62,8 @@ For OAuth, answer three independent questions: what authorizes issuance, how the
 | Access-token use | Bearer, certificate-bound token, DPoP-bound token where supported | Sender constraints require the resource server to validate the matching proof |
 | Representation | Opaque token or JWT according to the API contract | A format choice does not determine the grant or authorization policy |
 
+**One integration, three choices:** A partner's daemon uses the **client-credentials grant** because it acts under its own application authority. It uses **private_key_jwt client authentication** so the issuer checks a short-lived assertion signed by its registered key. If the API contract still issues **bearer access tokens**, a thief holding one can use it without that client assertion. To prevent token-only replay, the issuer and API must additionally support and enforce a sender-constrained token. Choosing stronger issuance authentication does not implicitly change the API's token-use contract.
+
 **Attack comparison:** An attacker steals only an API token. Rotating the token-endpoint client secret does not necessarily invalidate that token or prevent its use. A correctly enforced sender constraint can prevent token-only replay, but not an attacker who can also use the bound key. Compromise response must address both issuance and outstanding credentials.
 
 **API keys:** A per-client key can be appropriate for a simple, narrowly scoped integration when its bearer nature, storage, rotation, and revocation are acceptable. Keep keys out of URLs, separate test/production identities, and enforce permissions and quotas per owner. API keys do not provide a standard user-consent/delegation flow. A public browser cannot hide one.
@@ -82,6 +84,8 @@ An **opaque token** is a credential interpreted through a server-side contract o
 | Server-side browser session | Server controls login state and can invalidate it | Replicas, caches, and requests already in progress affect effective revocation latency |
 | Short access-token lifetime plus refresh | Bounds exposure when access credentials are self-contained | Revoking refresh prevents renewal, but does not inherently end existing access tokens |
 
+A **positive cache** retains a successful check and reuses it without contacting the authority again. For example, an API may save an introspection response saying that a token is active to reduce latency and issuer load. This creates a period when a later revocation is not yet visible. See the [mechanisms and worked timing bound](oauth2-oidc.md#revocation-and-current-authorization) before selecting a cache duration.
+
 **Reasoning exercise:** If an API caches an active introspection result for 60 seconds, a centrally revoked token can remain accepted for up to the remaining cache interval, assuming no other invalidation mechanism. If the requirement is a shorter bound, change the cache or add a revocation signal. Do not promise “instant logout” while keeping a positive cache that contradicts it.
 
 Define whether high-risk operations recheck current account/tenant state. During an outage, a known unexpired credential with trusted cached verification material differs from an unknown key or an expired credential. Do not disable validation to preserve availability.
@@ -90,6 +94,27 @@ Define whether high-risk operations recheck current account/tenant state. During
     - [Token Introspection and Caching](https://www.rfc-editor.org/rfc/rfc7662.html) (IETF)
     - [Token Revocation](https://www.rfc-editor.org/rfc/rfc7009.html) (IETF)
     - [JWT Validation Best Practices](https://www.rfc-editor.org/info/rfc8725/) (IETF)
+
+## Authorization Decisions and Their Caches
+
+Authentication identifies the caller; authorization evaluates a specific proposed operation. Consider user `u7`, action `invoice.read`, resource `invoice-42`, and tenant `tenant-A`. The policy might require current tenant membership and ownership of that invoice. Permission to read a different tenant's invoice cannot be reused for this request.
+
+| Model | What policy evaluates | Example |
+|---|---|---|
+| Role-based access control (RBAC) | Permissions associated with a scoped role | Tenant-A billing administrators may manage Tenant-A invoices |
+| Attribute-based access control (ABAC) | Properties of subject, resource, action, and environment | Allow export only for active staff, approved data classification, and an accepted device context |
+| Relationship-based access control | Relationships between subject and object | A document owner or explicitly assigned collaborator can read the document |
+
+These models can be combined. The server must constrain editable properties too: an allowed profile update does not authorize setting `isGlobalAdmin` or transferring tenant ownership. See [object and property authorization](../web-security/vulnerabilities.md#common-web-vulnerabilities).
+
+A decision cache stores the result of a policy evaluation, rather than just token validity. Its key must distinguish the inputs that can change the decision: subject, tenant, action, resource, relevant context, and policy/data versions where used. A key of only `userId` can incorrectly reuse a read permission for a write operation or another tenant. If ownership changes, the same key may also need invalidation even though the user and token are unchanged.
+
+**Example:** Cache an allow for `u7 / tenant-A / invoice-42 / read` for at most 10 seconds under a defined policy version. It cannot authorize `invoice-99`, a write, or tenant B. During a policy-service outage, a valid unexpired entry may be usable only for the explicitly approved operation/risk class. An expired or mismatched entry cannot be treated as permission. High-impact changes may require a fresh decision and fail when it cannot be obtained.
+
+Cache entries containing privileged results need protection from unauthorized modification. Define cache age, update propagation, invalidation and outage behavior together; a correct key does not solve stale permissions.
+
+!!! info "External Resources"
+    - [Authorization Models, Per-Request Checks, and Safe Failure](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html) (OWASP)
 
 ## OIDC, SAML, and Enterprise Lifecycle
 

@@ -34,6 +34,9 @@ flowchart TD
 4. At the API, validate the token's intended recipient and application identity, then authorize the requested tenant and report. The permission to call exports is not permission to export every tenant.
 5. Enforce per-owner quotas, export size/cost limits, audit events, and response-cache isolation. Never log raw credentials.
 
+**Concrete policy mapping:** Registration records integration `export-A` as owned by tenant A with `reports.read`. The API resolves the validated application identity to that server-owned registration and restricts its data query accordingly. A request parameter selecting tenant B cannot replace that mapping. If client authentication uses `private_key_jwt`, the client signs a short-lived assertion for the token endpoint with its registered key. The authorization server checks that assertion; the reports API later checks a separate access token. The client assertion authenticates issuance and is not itself an API credential.
+
+
 **Attack to reject:** A correctly authenticated customer A changes `/tenants/A/reports` to `/tenants/B/reports`. The API rejects the object/tenant access even if the token has `reports.read`. A tenant header is input, not an authority source.
 
 | Alternative | When it fits | Tradeoff |
@@ -77,6 +80,9 @@ flowchart TD
 ```
 
 **Decision:** Use a Backend for Frontend (BFF) as the confidential OAuth/OIDC client and keep access/refresh credentials server-side. The browser receives an opaque, Secure, HttpOnly session cookie. Login request binding, API authorization, and CSRF protections remain mandatory.
+
+**One ordinary request:** The browser sends its session cookie to `/api/invoices/42` on the BFF. The BFF checks the server session, any required CSRF evidence, and the permitted route. It retrieves the correct session's API credential and sends an access-token-authenticated request to the configured invoice API. The API checks token validity and invoice authorization, then returns data through the BFF. JavaScript receives invoice data rather than the backend's refresh token. A stolen browser session can still invoke permitted BFF routes, so hiding API tokens does not eliminate session theft.
+
 
 **Protection priorities:**
 
@@ -136,6 +142,9 @@ A delegated JWT's claims could include:
 
 The fragment omits the signature, expiry, and other required claims; trusted key selection and the profile's validation rules still apply. `act` has defined delegation semantics; arbitrary client-supplied `X-User` headers do not. Actor representation and client authentication depend on the chosen provider/profile.
 
+**Subject and actor example:** In the fragment, `sub=user-42` identifies whose delegated authority is being exercised; `act.sub=orders-service` identifies the service acting. Billing permits user-42 to read invoice 8 in tenant A, and permits orders-service to act for that user for invoice reads. Both conditions are necessary. Invoice 9 in tenant B remains denied even if orders-service can read it for a separate legitimate system job. The token service must refuse an exchange that asks for a broader audience or permission than the configured delegation permits.
+
+
 **Authorization:** Billing applies user entitlement, the current actor's permitted delegated capability, tenant/resource policy, and token restrictions. A user allowed to view an invoice does not thereby authorize every service to retrieve it. Keep subject, actor, request ID, and decision in the audit record without storing the token.
 
 **Why alternatives differ:** Forwarding an orders-only token should fail billing's audience check. Making one multi-audience token valid everywhere broadens replay exposure. Calling billing with orders' unrestricted application authority can lose the user's constraints and create a confused-deputy problem. Application-only authority is appropriate for a genuine system task, not as a fallback after user authorization fails.
@@ -145,6 +154,21 @@ The fragment omits the signature, expiry, and other required claims; trusted key
 !!! info "External Resources"
     - [Token Exchange and Delegation Semantics](https://www.rfc-editor.org/rfc/rfc8693.html#section-1.1) (IETF)
     - [Identity Propagation Patterns](https://cheatsheetseries.owasp.org/cheatsheets/Identity_Propagation_Patterns_Cheat_Sheet.html) (OWASP)
+
+### Queued Operations and Durable Approval
+
+A queue message outlives the HTTP request that created it. Define which authority must still exist when the worker executes; retaining yesterday's token or `authorized=true` does not answer that question.
+
+| Contract | At scheduling | At execution |
+|---|---|---|
+| Current entitlement | Record the requester and exact requested operation | Authenticate the worker, recheck current requester membership and resource/action policy, and reject if authority was removed |
+| Deliberately durable approval | Create a protected server-owned approval binding actor, tenant, action, parameters, expiry, and cancellation rules | Authenticate the worker and validate/consume that approval under its explicit survival rules; do not silently substitute worker-wide privileges |
+
+**Example:** Alice schedules an export of tenant A's invoices, then leaves tenant A. A current-entitlement export is denied when it runs. A separately approved business export may continue only if its contract explicitly survives Alice's departure and its protected approval remains valid. Changing the destination or invoice set must not inherit the original approval. Coordinate the final decision with execution to avoid a permission change racing the operation; external side effects also need idempotency and recovery handling.
+
+!!! info "External Resources"
+    - [Operation Data Binding and Final Authorization](https://cheatsheetseries.owasp.org/cheatsheets/Transaction_Authorization_Cheat_Sheet.html) (OWASP)
+
 
 ## 4. Authenticate a Human CLI Separately from a Daemon
 
@@ -159,6 +183,9 @@ The fragment omits the signature, expiry, and other required claims; trusted key
 | Unattended schedule | Dedicated workload identity or confidential-client application credentials | Restrict the job's purpose and permissions independently of an employee's login |
 
 For a device flow, the tool obtains a device code and user-facing verification instructions. The user authorizes the request at the provider; the tool polls with the device code until completion or expiry. It must honor the returned interval and slowdown/error responses. An embedded “client secret” distributed to every CLI user is not confidential.
+
+**Two channels:** The CLI receives a private device code for polling and shows a user code/verification URL. The user opens that URL in a browser and approves the displayed authorization. The provider then allows the polling CLI to receive credentials. The user code connects the browser approval to a particular pending device request; it is not proof that the CLI belongs to the approving person. If the attacker supplies their own code to the victim, the victim's successful login can authorize the attacker's waiting CLI.
+
 
 **Attack to discuss:** An attacker starts a legitimate device authorization and persuades a victim to approve its code. Authentication at the real IdP can succeed while authorizing the wrong device/client. Phishing-resistant login alone does not prove that the user intended this authorization. Show meaningful client/action context and teach users to initiate their own flows; do not claim short code expiry eliminates real-time phishing.
 
@@ -183,6 +210,20 @@ For a device flow, the tool obtains a device code and user-facing verification i
 3. Map the stable protocol identity to the application's account and membership. Do not auto-merge a privileged local account with any new IdP account that presents the same email.
 4. Map external groups/roles through an explicit, tenant-scoped policy. A customer's `admin` value might mean that customer's administrator; it must not mean global SaaS operator.
 5. Treat provisioning, deprovisioning, group changes, local sessions, and API grants as separate lifecycle components. Define reconciliation and stale-membership behavior.
+
+**Lifecycle terms:** **Provisioning** creates accounts/memberships; **deprovisioning** removes or disables them. **Just-in-time creation** creates the local account at login. It says nothing about removing it later. **Reconciliation** periodically compares application state with the authoritative directory to repair missed updates.
+
+**Offboarding example:** The customer disables a user at 10:00. New IdP authentication may now fail, while an application session created at 09:00 remains valid. A provisioning notification at 10:00:10 can remove local membership and invalidate local sessions, but API tokens and policy caches still need the [defined removal bound](oauth2-oidc.md#revocation-and-current-authorization). If notifications fail, reconciliation must have a known interval or a separate emergency removal path. Login federation alone does not guarantee offboarding.
+
+### Account Linking and Unlinking
+
+Linking gives another identity a route into an existing account. An email collision is insufficient evidence for that change. A normal linking workflow starts from the existing authenticated account, requires recent authentication when appropriate, and performs a transaction-bound login for the new identity. The server records the newly validated issuer/subject pair only after checking control of both accounts and the linking operation's authorization.
+
+For example, Alice signs into her existing account and explicitly links her company IdP identity. A separate callback for that linking transaction must not instead attach the identity to another browser account. Unlinking or replacing recovery factors also changes account control: authorize it separately, audit it, and ensure the user retains a permitted sign-in/recovery path. An enterprise provisioning exception needs a deliberately approved tenant-specific policy.
+
+!!! info "External Resources"
+    - [Authentication and Sensitive Account Changes](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html) (OWASP)
+
 
 **Attack to reject:** A valid token from customer A arrives on customer B's callback or selects tenant B in a request body. A signature under shared provider keys is insufficient; identity and membership must resolve to the intended tenant context.
 
@@ -219,6 +260,9 @@ sequenceDiagram
     A->>A: Enforce role and resource policy
 ```
 
+**Two credentials:** The CI assertion tells the cloud token service which job is requesting access. After validating that assertion and its trust conditions, the cloud issues a different temporary credential for the deployment role. Assertion expiry limits exchange; role-session expiry limits use of the resulting cloud credential. Expiring or blocking future CI assertions does not necessarily invalidate an already issued cloud session.
+
+
 **Decision:** Configure a narrowly scoped trust relationship and temporary deployment role. The job's right to request an assertion is not itself cloud authorization; the cloud trust policy decides which assertion is acceptable.
 
 For GitHub Actions, evaluate issuer, intended audience, and subject/workflow conditions supported by the provider. A subject using `environment:production` is not the same as a branch-form subject. Protect the production environment's allowed deployment refs and approvals separately; do not assume an environment-form subject also contains a branch restriction.
@@ -252,6 +296,9 @@ For GitHub Actions, evaluate issuer, intended audience, and subject/workflow con
 3. Validate the step-up response and retain server-controlled evidence of freshness and scope. A client-side `mfa_complete=true` flag is not evidence.
 4. Revalidate the target operation and its parameters at execution. A recent login alone is not a cryptographic signature of a payment's amount or destination.
 5. Audit elevation, action completion, recovery, and credential enrollment without collecting authenticators or tokens.
+
+**Freshness evidence:** In OIDC, the application can request a supported `max_age` and check the returned `auth_time` against the action's recency limit. It also evaluates provider-defined authentication context/method evidence where required. A token refreshed a minute ago can have a recent `iat` while its user's `auth_time` is hours old. A local WebAuthn step-up instead validates a fresh server challenge and required verification flags, then records that successful event server-side. Neither design trusts a browser's claim that MFA happened. See [independent lifetime policies](oauth2-oidc.md#independent-lifetime-policies).
+
 
 **Concrete operation binding:** The application creates a server-owned pending operation with an unpredictable approval ID, the acting user/account, action, target, exact destination/amount where applicable, and an expiry. The step-up transaction references that record. After validating the returned authentication evidence, the server marks only that operation approved. Execution checks the same stored parameters and current policy and consumes the approval once, coordinating the state transition with the operation; an external side effect needs idempotency/recovery handling too. Editing the destination or amount invalidates the approval rather than inheriting the earlier success.
 

@@ -1,10 +1,12 @@
 # Tricky Authentication & Authorization Interview Questions
 
-Fifteen practice questions test authentication and authorization reasoning using documented vulnerability patterns and design tradeoffs.
+Nineteen practice questions test authentication and authorization reasoning using documented vulnerability patterns and design tradeoffs.
 
 Answer aloud before expanding the guidance. State assumptions, identify the accepted credential or authorization decision, explain why the proposed protection is insufficient, and name a test that would distinguish a correct design. The [architecture comparison](comparison.md) and [design patterns](design-patterns.md) provide longer worked examples.
 
 ## 1. The JWT Signature Is Valid. Why Might the API Still Reject It?
+
+**Study first:** [JWT acceptance](jwt.md#acceptance-and-authorization) and [token roles](oauth2-oidc.md#roles-and-token-purposes).
 
 **Scenario:** An API accepts tokens signed by a trusted provider. A caller presents a correctly signed OIDC ID token issued to the browser application. Its subject is a real user and it has not expired. Should the API accept it?
 
@@ -25,12 +27,18 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
 
 ## 2. Can You Guarantee Revocation Within 30 Seconds with 15-Minute JWTs?
 
+**Study first:** [Revocation and current authorization](oauth2-oidc.md#revocation-and-current-authorization).
+
 **Scenario:** Access tokens last 15 minutes and APIs validate them locally. An employee loses an administrator role. Product requires that new administrator requests stop succeeding within 30 seconds. The team revokes the refresh token and clears the browser cookie. Is the requirement met?
 
 ??? note "Answer guidance and common trap"
     **Not by those actions alone.** The copied access token remains usable under the stated local validation policy until expiry. Browser logout does not remove another copy, and stopping renewal does not necessarily reject an existing token.
 
-    Add a sufficiently fresh account/permission or revocation check, use introspection with a suitable cache bound, or change the lifetime/authorization design. Include replication and invalidation delays in the guarantee. A 60-second positive cache already conflicts with a 30-second bound unless another mechanism shortens acceptance.
+    The API needs a way to learn that authority changed. A **current permission lookup** asks the application's policy store whether this user is still an administrator. A **revocation lookup** asks whether this token/session has been invalidated. **Introspection** asks the authorization server whether the token is active; verify which account changes actually make it inactive. These checks answer different questions, and the API must still authorize the requested operation.
+
+    A successful result can be **cached** to avoid a lookup on every request. Suppose the API learns “administrator allowed” at 12:00:00 and keeps that result for 60 seconds. The role is removed at 12:00:01, but the API can continue using the cached allow until 12:01:00. That already exceeds the 30-second removal requirement.
+
+    Updates can also take time to reach another region's database copy (**replication**) or to cause an API to discard its saved result (**cache invalidation**). Bound these delays on every request path. For example, a maximum 5-second state propagation delay plus 20-second cache reuse and 2-second processing allowance gives a 27-second bound under those stated assumptions. If fresh evidence cannot be obtained, privileged requests must follow an explicit outage policy; continuing indefinitely would break the guarantee. See the [full mechanism and timing explanation](oauth2-oidc.md#revocation-and-current-authorization).
 
     **Trap:** Equating “cannot get another token” with “cannot use this token.”
 
@@ -43,6 +51,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
     - [OAuth Token Revocation](https://www.rfc-editor.org/rfc/rfc7009.html) (IETF)
 
 ## 3. Does PKCE Let You Remove State, Nonce, and Client Authentication?
+
+**Study first:** [Authorization code + PKCE](oauth2-oidc.md#authorization-code-flow-with-pkce).
 
 **Scenario:** A developer adds PKCE to an OIDC login and deletes the library's transaction handling because “the verifier prevents all login attacks.” Which protections remain necessary?
 
@@ -63,6 +73,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
 
 ## 4. Are SameSite and HttpOnly Enough to Protect a BFF?
 
+**Study first:** [Cookie scope and CSRF](sessions.md#cookie-scope-and-csrf) and [the BFF pattern](design-patterns.md#2-protect-a-browser-application-with-a-backend-for-frontend).
+
 **Scenario:** `app.example.com` uses an HttpOnly, SameSite cookie. Untrusted customer content runs at `uploads.example.com`, both over HTTPS. The team removes CSRF checks and says XSS cannot harm the session because JavaScript cannot read the cookie. What is wrong?
 
 ??? note "Answer guidance and common trap"
@@ -81,6 +93,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
     - [Browser Architecture Threats](https://www.rfc-editor.org/rfc/rfc10017.html#section-5) (IETF)
 
 ## 5. Can Two Accounts Be Linked Because Both Providers Verify the Same Email?
+
+**Study first:** [Account linking](design-patterns.md#account-linking-and-unlinking).
 
 **Scenario:** A local privileged account and a new federated identity report the same email address. The new provider marks the email verified. Should the application automatically merge the accounts?
 
@@ -101,6 +115,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
 
 ## 6. A Python Client Calls Your API. Which OAuth Grant Should It Use?
 
+**Study first:** [Human CLI versus daemon](design-patterns.md#4-authenticate-a-human-cli-separately-from-a-daemon).
+
 **Scenario:** An interviewer asks for authentication for a Python client. You answer “client credentials.” What requirement have you not established?
 
 ??? note "Answer guidance and common trap"
@@ -119,6 +135,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
     - [Native Application OAuth](https://www.rfc-editor.org/rfc/rfc8252.html) (IETF)
 
 ## 7. Does mTLS at the Token Endpoint Stop a Stolen Access Token?
+
+**Study first:** [Sender-constrained token use](mtls.md#oauth-client-authentication-and-token-binding).
 
 **Scenario:** A partner authenticates to the token endpoint with mTLS. An attacker later steals only its access token. The API accepts ordinary bearer tokens. Can the attacker call the API?
 
@@ -139,6 +157,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
 
 ## 8. Can an Account with FIDO2 Still Be Taken Over?
 
+**Study first:** [WebAuthn threats and recovery](webauthn.md#threats-recovery-and-policy) and [sensitive actions](design-patterns.md#7-require-stronger-authentication-for-sensitive-actions).
+
 **Scenario:** An application requires a phishing-resistant security key at login. Support can reset the factor after answering profile questions, and administrators keep long-lived sessions. Is takeover eliminated?
 
 ??? note "Answer guidance and common trap"
@@ -158,6 +178,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
 
 ## 9. Does Replacing Sequential IDs with UUIDs Fix IDOR?
 
+**Study first:** [Object and property authorization](../web-security/vulnerabilities.md#common-web-vulnerabilities) and [authorization models](comparison.md#authorization-decisions-and-their-caches).
+
 **Scenario:** A route verifies login and the `invoice.read` permission, then fetches an invoice using its UUID. The client also supplies a tenant ID. Why can this remain vulnerable?
 
 ??? note "Answer guidance and common trap"
@@ -175,6 +197,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
     - [IDOR Prevention and Multi-Identity Testing](https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html) (OWASP)
 
 ## 10. Is a Tenant Administrator Allowed to Edit Every Field?
+
+**Study first:** [Authorization decisions](comparison.md#authorization-decisions-and-their-caches) and [mass assignment](../web-security/vulnerabilities.md#common-web-vulnerabilities).
 
 **Scenario:** A user is an administrator in tenant A. A profile endpoint binds the request JSON to a model. The request includes `tenantId`, `isGlobalAdmin`, and `ownerId`. Is checking the administrator role enough?
 
@@ -195,6 +219,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
 
 ## 11. Can Internal Services Trust an X-User Header from the Gateway?
 
+**Study first:** [Proxy identity boundaries](mtls.md#identity-and-authorization-boundaries).
+
 **Scenario:** The gateway validates login and forwards `X-User: user-42`. Internal services accept the header because they are on a private network. What must be true for this design to be safe?
 
 ??? note "Answer guidance and common trap"
@@ -214,6 +240,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
 
 ## 12. Can a Service Use Its Own Privileges When the User Is Denied?
 
+**Study first:** [User delegation](design-patterns.md#3-preserve-user-delegation-across-service-calls).
+
 **Scenario:** A user asks orders to retrieve a billing record. The user's downstream token is rejected. Orders retries using its powerful billing service credential, which succeeds. Is this a resilience feature?
 
 ??? note "Answer guidance and common trap"
@@ -231,6 +259,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
     - [Delegation, Impersonation, and Actor Claims](https://www.rfc-editor.org/rfc/rfc8693.html#section-1.1) (IETF)
 
 ## 13. A SAML Signature Validates. Can You Use Any Assertion in the Response?
+
+**Study first:** [SAML signed-content validation](saml.md#assertion-validation).
 
 **Scenario:** A SAML response contains multiple XML elements. The signature library reports success, but application code separately searches for the first assertion and reads its subject. What could go wrong?
 
@@ -250,6 +280,8 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
 
 ## 14. If a Job Was Authorized When Queued, Can It Run Tomorrow?
 
+**Study first:** [Queued-operation authority](design-patterns.md#queued-operations-and-durable-approval).
+
 **Scenario:** A user schedules a sensitive export. Before execution, the user is removed from the tenant and the requested resource changes ownership. The job contains yesterday's access token and an `authorized=true` field. Should it proceed?
 
 ??? note "Answer guidance and common trap"
@@ -268,10 +300,14 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
 
 ## 15. Can You Cache an Allow Decision by User ID and Keep Serving During an Outage?
 
+**Study first:** [Authorization caches](comparison.md#authorization-decisions-and-their-caches).
+
 **Scenario:** A shared authorization cache uses only `userId` as its key. During a policy-service outage, the application reuses any cached allow decision. One user belongs to multiple tenants with different permissions. What is the failure mode?
 
 ??? note "Answer guidance and common trap"
     An allow decision is about a particular subject, action, resource, tenant, and relevant context. Omitting policy inputs can reuse permission for a different operation. Define a cache key covering the decision's actual inputs, a validity bound, and invalidation/version behavior. Permission changes and data changes can invalidate the result even if the identity is unchanged.
+
+    **Concrete collision:** If `cache[u7] = allow` was produced by reading invoice 42 in tenant A, reusing it for `u7 / tenant-B / invoice-99 / write` changes three policy inputs. A decision key could include `(subject, tenant, action, resource, relevant context/policy version)`; the actual inputs depend on the policy. Even that key needs a freshness bound when membership or ownership changes. See [authorization decisions and their caches](comparison.md#authorization-decisions-and-their-caches).
 
     Separate authentication verification from current authorization. A known unexpired credential may remain verifiable with trusted cached keys; that does not make an unrelated cached allow valid. Define which operations can use bounded cached policy and which must stop when fresh evidence is unavailable. Unknown keys and expired credentials are not resolved by a fail-open rule.
 
@@ -284,6 +320,59 @@ Answer aloud before expanding the guidance. State assumptions, identify the acce
 !!! info "External Resources"
     - [Authorization Checks and Safe Failure](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html) (OWASP)
     - [Token Introspection Cache Considerations](https://www.rfc-editor.org/rfc/rfc7662.html#section-4) (IETF)
+
+## 16. Why Is a Longer-Lived Refresh Token Different from a Long-Lived Access Token?
+
+**Study first:** [Refresh exchange](oauth2-oidc.md#refresh-exchange-and-reuse-detection) and [lifetime selection](oauth2-oidc.md#selecting-lifetimes).
+
+**Scenario:** Access tokens last five minutes, but the refresh grant can last a day. Has the design merely moved the same risk elsewhere?
+
+??? note "Answer guidance and common trap"
+    Renewal is concentrated at the authorization server, where client binding, expiry, grant revocation, rotation/reuse detection, or sender constraints can be checked. The refresh token is not sent to each API. This can reduce credential distribution and allow renewal to stop without querying the issuer on every API request.
+
+    A stolen usable refresh token is still highly valuable: it may mint replacement access tokens until renewal is stopped. Protect its storage and set idle/absolute limits. Short access expiry is insufficient if the attacker can continually renew. The design trades different exposure and enforcement points; a longer lifetime is not safe merely because the credential is called a refresh token.
+
+    **Test:** Revoke the renewable grant, confirm refresh fails, and separately measure how long a previously copied access token still works.
+
+## 17. Does Refresh-Token Reuse Always Prove Theft?
+
+**Study first:** [Rotation and concurrent refreshes](oauth2-oidc.md#refresh-exchange-and-reuse-detection).
+
+**Scenario:** Two tabs redeem the same rotating refresh token at nearly the same time. One succeeds; the other receives `invalid_grant`. Should the application blindly retry the old credential?
+
+??? note "Answer guidance and common trap"
+    Concurrent legitimate callers or a lost response can produce reuse, so it is not conclusive attribution of theft. The issuer nevertheless cannot safely assume that the second caller is legitimate. The RFC 9700 rotation defense revokes the affected active refresh credential when reuse is detected. Coordinate refresh per grant and store replacements safely; follow documented recovery behavior rather than repeatedly presenting an invalid predecessor.
+
+    Rotation does not reset a separately fixed absolute deadline. Browser refresh-token rotation must not extend a pre-established original expiry. Nor does rotation automatically invalidate previously issued access tokens.
+
+    **Test:** Exercise concurrent calls and a lost refresh response. Verify bounded recovery, no indefinite old-token acceptance, and preservation of the original absolute deadline.
+
+## 18. Does a Newly Issued ID Token Prove Recent Human Authentication?
+
+**Study first:** [Independent lifetime policies](oauth2-oidc.md#independent-lifetime-policies) and [sensitive-action freshness](design-patterns.md#7-require-stronger-authentication-for-sensitive-actions).
+
+**Scenario:** The client refreshes credentials at 14:00 and receives an ID token with a new `iat`. The user signed in at 09:00. A payout change requires authentication within five minutes. Is the new issuance time enough?
+
+??? note "Answer guidance and common trap"
+    No. Issuance and user authentication are different events. Check trusted authentication-time evidence and the required context; obtain a new interactive authentication when the recency requirement is not met. Refresh can occur while the user is absent.
+
+    Conversely, expiry of the ID token originally used to establish a session does not by itself terminate that application's server session. Session idle/absolute limits and action-specific freshness must be enforced separately.
+
+    **Test:** Refresh an old authenticated grant and confirm it does not silently satisfy recent-authentication policy. Also test session expiry independently of the ID token's expiry.
+
+## 19. Can an API Accept an Unknown Signing Key During an Issuer Outage?
+
+**Study first:** [Trusted keys and rotation](jwt.md#trusted-keys-and-rotation).
+
+**Scenario:** Known cached keys still verify existing tokens, but a new token contains an unknown `kid`. Fetching the configured JWKS fails. May the API skip verification because the outage is temporary?
+
+??? note "Answer guidance and common trap"
+    No. A bounded refresh can retrieve a new trusted key when available; failure does not establish trust in the unknown key. Reject credentials that cannot be validated. Known cached keys may still validate appropriate unexpired tokens under the deployment's cache policy.
+
+    Planned rollover publishes new keys early and retains old public keys for valid outstanding tokens. Compromise response instead requires rejecting affected signing authority; simply publishing a replacement leaves old-key tokens potentially usable.
+
+    **Test:** Unknown IDs fail during an outage; random IDs cannot trigger unlimited key-fetch traffic; retirement/compromise policy reaches every verifier within its stated bound.
+
 
 ## Self-Assessment
 
