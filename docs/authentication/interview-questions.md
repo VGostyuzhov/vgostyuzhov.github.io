@@ -2,7 +2,7 @@
 
 Nineteen practice questions test authentication and authorization reasoning using documented vulnerability patterns and design tradeoffs.
 
-Answer aloud before expanding the guidance. Each question has separate expandable answer guidance and a worked example with concrete inputs and decisions. State assumptions, identify the accepted credential or authorization decision, explain why the proposed protection is insufficient, and name a test that would distinguish a correct design. The [architecture comparison](comparison.md) and [design patterns](design-patterns.md) provide longer worked examples.
+Answer aloud before expanding the guidance. Each question has separate expandable answer guidance and a worked example with concrete inputs, commented code or protocol messages, and expected decisions. Code marked as pseudocode illustrates application logic; placeholders and demo keys are not production credentials. State assumptions, identify the accepted credential or authorization decision, explain why the proposed protection is insufficient, and name a test that would distinguish a correct design. The [architecture comparison](comparison.md) and [design patterns](design-patterns.md) provide longer worked examples.
 
 ## 1. The JWT Signature Is Valid. Why Might the API Still Reject It?
 
@@ -20,9 +20,38 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** A signed token with the browser client as audience fails at the API even when a matching API access token succeeds.
 
 ??? example "Worked example"
-    **Inputs:** The orders API trusts issuer `https://id.example` and expects audience `orders-api`. Alice presents an unexpired ID token with `aud=browser-client`, signed by the provider's normal key.
+    This runnable PyJWT example creates real signed tokens with a public demo key. Use it only as a local fixture: anyone who knows this key can mint tokens. Production follows the actual issuer's key distribution and token profile.
 
-    **Decision:** The signature passes, but recipient/purpose validation fails. The API rejects it before reading role claims as permissions. A separate access token for `orders-api` can pass token validation; Alice must still be authorized to read order 42. Sharing the signing key does not make the two credentials interchangeable.
+    ```python
+    import time
+    import jwt  # PyJWT; example dependency, not Python's standard library.
+
+    DEMO_KEY = "documentation-only-secret-not-for-production"
+    now = int(time.time())
+    common = {"iss": "https://id.example", "sub": "user-42",
+              "iat": now, "exp": now + 600}
+    id_token = jwt.encode({**common, "aud": "browser-client"},
+                          DEMO_KEY, algorithm="HS256")
+    access_token = jwt.encode({**common, "aud": "orders-api"},
+                              DEMO_KEY, algorithm="HS256")
+    print(id_token)      # A complete header.payload.signature compact JWT.
+    print(access_token)  # Separately signed; not an edited ID-token payload.
+
+    for label, raw in (("ID token", id_token), ("access token", access_token)):
+        try:
+            claims = jwt.decode(
+                raw, DEMO_KEY, algorithms=["HS256"],
+                issuer="https://id.example", audience="orders-api",
+                options={"require": ["iss", "sub", "aud", "iat", "exp"]},
+            )
+            print(label, "passes these token checks")
+        except jwt.InvalidAudienceError:
+            print(label, "rejected: recipient is not orders-api")
+    # Expected: ID token rejected; access token passes these checks.
+    # A real API also enforces its token-purpose profile and resource policy.
+    ```
+
+    Decode either payload for inspection: the audience differs despite the same issuer and subject. Editing `aud` inside the first token without re-signing it must fail signature verification. Neither decoding nor passing these illustrative checks replaces the API's full access-token acceptance contract.
 
 **Follow-up:** What if two token types share the same signing key and some overlapping claims? Explain profile-specific acceptance rules; key separation can help but does not replace audience/purpose checks.
 
@@ -50,9 +79,30 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** Copy a credential in a controlled test, revoke the role, and measure when every API region stops accepting new privileged requests. Separately decide what happens to operations already in progress.
 
 ??? example "Worked example"
-    **Timeline:** An administrator token is issued at 12:00 and expires at 12:15. The role is removed at 12:01. An API checking only signature and expiry can still accept a copied token at 12:02, even after the refresh grant is revoked.
+    This timeline distinguishes the signed credential's expiry from a cached permission decision. Times and bounds are illustrative.
 
-    **Corrected design:** Every privileged request checks current administrator permission, with at most five seconds of update propagation and 20 seconds of cached-result reuse. Reserve another two seconds for processing uncertainty: the stated maximum is 27 seconds if all those bounds hold. A request at 12:01:28 must no longer succeed on the old permission. If the policy service is unavailable and evidence is too old, deny the privileged operation rather than extending its cached allow.
+    ```text
+    12:00:00  JWT issued: sub=admin-7, role=admin, exp=12:15:00
+    12:00:59  API caches current_permission(admin-7, admin)=allow for 60s
+    12:01:00  Administrator role removed; refresh grant revoked
+    12:01:31  Copied JWT is still unexpired; cached allow is still usable
+    12:01:59  Old cached allow finally expires
+    # A 30-second removal guarantee failed even with an immediate central update.
+    ```
+
+    ```python
+    # Application pseudocode: this check runs on every privileged operation.
+    claims = validate_access_token(request.token)  # Signature + profile + times.
+    permission = permissions.lookup(claims["sub"], request.tenant, "admin")
+    if permission.unavailable or permission.too_old:
+        deny()  # This privileged operation requires bounded fresh evidence.
+    if not permission.allowed:
+        deny()
+    # Example budget: propagation <= 5s, cache reuse <= 20s, overhead <= 2s.
+    # Enforced worst-case total: 27s, including a lookup just before propagation.
+    ```
+
+    Cache deadlines start at the authority evaluation and must not be reset by cache hits. A permission lookup must actually reflect role removal. Merely introspecting a token that the issuer still considers active does not supply that guarantee.
 
 **Follow-up:** Can you still call the system stateless? Explain which part verifies tokens locally and which part needs current authorization state; terminology cannot override the revocation requirement.
 
@@ -76,9 +126,31 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** A callback from a different browser transaction, wrong issuer, or wrong nonce must not create a session; a stolen code without its verifier must not redeem successfully.
 
 ??? example "Worked example"
-    **Transactions:** Alice's browser starts login with verifier `V-A`, state `S-A`, and nonce `N-A`. A different browser interaction has `V-B`, `S-B`, and `N-B`. A code bound to `V-B` cannot be redeemed with `V-A`.
+    A code-flow request carries separate values for separate checks. The verifier/challenge pair below is the published RFC 7636 S256 test vector, for testing only. Production generates a new unpredictable verifier for every transaction.
 
-    **Separate checks:** In this state-based implementation, a callback carrying `S-B` also fails Alice's retained transaction binding. An ID token with the wrong nonce fails even if code redemption succeeded. A confidential backend must still supply its registered client authentication. PKCE protects the code exchange; it does not make the remaining checks unnecessary. Other conforming library designs may implement transaction/CSRF binding differently.
+    ```http
+    GET /authorize?response_type=code&client_id=web-client&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback&scope=openid&state=S-A&nonce=N-A&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256 HTTP/1.1
+    Host: id.example
+    ```
+
+    ```python
+    # Application pseudocode; a maintained OIDC library performs these bindings.
+    # Stored when this browser started login; never put the verifier in the URL.
+    # Test-only verifier: dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+    tx = transaction_store.for_browser(request.session)
+    require(request.query["state"] == tx.state)       # Callback correlation.
+    tokens = oidc.redeem_code(
+        code=request.query["code"], verifier=tx.verifier,
+        client_auth=registered_client_auth,            # Confidential client proof.
+    )
+    id_claims = oidc.validate_id_token(tokens.id_token) # Issuer, aud, signature, times.
+    require(id_claims["nonce"] == tx.nonce)            # N-B must not satisfy N-A.
+    consume(tx)                                      # Transaction cannot be reused.
+    # Wrong verifier: token endpoint rejects redemption.
+    # Wrong nonce: client rejects login even if token signature is valid.
+    ```
+
+    This illustrates a state-and-nonce-based implementation. Another conforming library may use a different supported transaction/CSRF defense; PKCE alone is not permission to delete its validation.
 
 **Follow-up:** Would a client secret compiled into a distributed CLI make it confidential? No; evaluate who can recover or use that credential.
 
@@ -102,9 +174,31 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** Requests from the untrusted sibling context cannot complete a state change without the required CSRF evidence. Also test injected same-origin script separately; CSRF tokens alone do not neutralize XSS.
 
 ??? example "Worked example"
-    **Sibling-origin request:** Alice is logged in to `https://app.example.com`. Untrusted content at `https://uploads.example.com` submits a form to the application's change-email endpoint. A same-site cookie may accompany the request even though the initiating origin differs.
+    A sibling page can send a simple form request without reading the application's cookie. This is a local test fixture, not a claim that CORS permits reading the response.
 
-    **Decision:** Require valid CSRF evidence and reject this state change when it is absent. HttpOnly does not help with this request because the attacker did not need to read the cookie. If script instead executes inside `app.example.com`, it may read the page's CSRF token and issue authenticated requests; that separate XSS problem requires fixing script injection.
+    ```http
+    Set-Cookie: __Host-session=<opaque-id>; Secure; HttpOnly; SameSite=Lax; Path=/
+    ```
+
+    ```html
+    <!-- Hosted on https://uploads.example.com, a different origin but same site. -->
+    <form action="https://app.example.com/account/email" method="POST">
+      <input name="email" value="changed@example.test">
+      <!-- No valid application CSRF token is available to this page. -->
+      <button>Submit test request</button>
+    </form>
+    ```
+
+    ```python
+    # Application pseudocode for the receiving endpoint.
+    session = require_valid_session(request.cookies["__Host-session"])
+    csrf.verify(request, session)  # Reject missing/session-mismatched CSRF evidence.
+    authorize(session.user, "change-email", session.account)
+    # HttpOnly blocks document.cookie reads; it does not stop automatic cookie sends.
+    # Same-origin XSS can often read CSRF evidence and invoke this endpoint itself.
+    ```
+
+    Keep state changes off GET routes and apply the framework's full CSRF policy; a SameSite cookie is an additional control.
 
 **Follow-up:** Does changing Lax to Strict isolate an untrusted same-site subdomain? No; it does not change the site/origin distinction.
 
@@ -128,9 +222,34 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** An identity from an unapproved issuer or another tenant cannot acquire an existing account through an email collision or a forged linking callback.
 
 ??? example "Worked example"
-    **Email collision:** An existing privileged account is bound to `(issuer-A, subject-17)` and currently uses `admin@example.com`. A new identity `(issuer-B, subject-93)` reports the same verified email. The application has no approved policy that makes issuer B authoritative over the existing account.
+    The same email appears in two different provider identities. These are decoded claims for illustration, not complete signed ID tokens.
 
-    **Decision:** Do not merge the accounts. To link them, the account owner starts from the existing authenticated account and completes a separately bound authentication for the new identity. The application validates both controls and the linking transaction before recording the second issuer/subject pair. A successful login to issuer B alone cannot replace the old account's recovery factors.
+    ```json
+    {
+      "existing_identity": {
+        "iss": "https://issuer-a.example", "sub": "17", "email": "admin@example.com"
+      },
+      "new_identity": {
+        "iss": "https://issuer-b.example", "sub": "93",
+        "email": "admin@example.com", "email_verified": true
+      }
+    }
+    ```
+
+    ```python
+    # Application pseudocode: issuer/subject is the identity key, not email.
+    new_identity = (validated_claims["iss"], validated_claims["sub"])
+    # UNSAFE: accounts.by_email(validated_claims["email"]).link(new_identity)
+    existing = require_existing_account_session()
+    require_recent_authentication(existing)
+    link_tx = require_bound_link_transaction(existing, callback)
+    require(link_tx.new_identity == new_identity)
+    authorize(existing.user, "link-identity", existing.account)
+    identities.link_uniquely(existing.account, new_identity)
+    # Reject a callback for another browser/account; never silently merge by email.
+    ```
+
+    The callback also needs normal provider and transaction validation. A separately approved enterprise linking policy must define its narrower authority explicitly.
 
 **Follow-up:** Is signing in through the new identity enough to unlink the old one or replace recovery factors? Explain why changing account-control mechanisms requires separate authorization.
 
@@ -154,9 +273,26 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** Audit records and policy distinguish application-only access from actions on behalf of a user, including the correct tenant, scope, and actor.
 
 ??? example "Worked example"
-    **Same language, different principals:** Alice runs `reports.py` on her laptop to read reports she is allowed to see. A company scheduler runs another Python process to produce an organization-owned nightly export.
+    The request language does not identify the principal. These are token-endpoint request bodies after the appropriate setup.
 
-    **Choices:** Alice's tool can use a supported browser authorization-code flow with PKCE, preserving her delegated authority. The scheduler receives its own restricted workload/application identity, using supported federation or confidential-client credentials. Removing Alice from the organization should remove her tool's access without requiring the company to retain her account for the schedule.
+    ```text
+    # Alice's interactive CLI: redeem a browser-issued code with its PKCE verifier.
+    # Public client: no supposedly secret credential embedded in the distributed CLI.
+    grant_type=authorization_code&client_id=cli&code=<one-time-code>&code_verifier=<verifier>&redirect_uri=<registered-uri>
+
+    # Organization-owned daemon: authenticate the confidential application itself.
+    # Client authentication is supplied separately by its registered method.
+    grant_type=client_credentials&scope=reports.read
+    ```
+
+    ```python
+    # Application audit pseudocode: retain whose authority is being exercised.
+    audit(principal="alice", mode="user-delegated", action="report.read")
+    audit(principal="nightly-export", mode="application", action="report.export")
+    # Offboarding Alice must not require retaining her login for the nightly job.
+    ```
+
+    A supported workload-federation exchange can replace a stored daemon credential and may use a different grant/profile.
 
 **Follow-up:** A nightly business export must continue after the employee who configured it leaves. Decide whether the business should authorize a separately owned application identity instead of retaining that employee's account.
 
@@ -180,9 +316,26 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** Present the token without the bound proof or with a different certificate/key; a sender-constrained API rejects it.
 
 ??? example "Worked example"
-    **Bearer case:** The partner proves possession of its private key when obtaining access token `A1` at the token endpoint. The reports API later accepts `A1` as a bearer credential. A thief who copies only `A1` can send it over their own HTTPS connection; the API has not required the issuance certificate.
+    The first request uses a bearer token. In the second case, the API contract explicitly requires a certificate-bound credential.
 
-    **Bound-token case:** The issuer binds `A1` to certificate C and the API enforces that binding. A connection authenticated with certificate D fails, even if `A1` is otherwise valid. With a terminating proxy, the enforcing component needs authenticated evidence of C from the trusted proxy; a caller-written certificate header cannot supply it.
+    ```bash
+    # A copied bearer token can be presented without the issuance client certificate.
+    curl https://api.example/reports -H "Authorization: Bearer $ACCESS_TOKEN"
+
+    # For a certificate-bound API, the client also proves possession of its key.
+    curl https://api.example/reports \
+      --cert partner-cert.pem --key partner-key.pem \
+      -H "Authorization: Bearer $BOUND_ACCESS_TOKEN"
+    # Copying the token without the bound private-key capability must not suffice.
+    ```
+
+    ```json
+    {
+      "cnf": {"x5t#S256": "<base64url-SHA256-of-bound-certificate-DER>"}
+    }
+    ```
+
+    The JSON shows the certificate-binding claim used by the profile, not a complete token. The API validates the token and compares the authenticated client certificate with that binding, obtaining the certificate from validated TLS state or explicitly trusted proxy evidence, never an untrusted caller header. A different valid certificate must fail the binding check; trusting its CA alone is insufficient.
 
 **Follow-up:** TLS terminates at a load balancer. Explain how the verifier receives authenticated client-certificate evidence and why a caller-supplied certificate header is not proof.
 
@@ -206,9 +359,30 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** Recovery cannot silently replace the factor with weaker evidence; sensitive operations require the configured server-validated authentication context.
 
 ??? example "Worked example"
-    **Recovery bypass:** Alice uses a security key for login. An attacker knows answers to public profile questions and persuades support to replace her registered authenticator. The attacker then logs in using the newly enrolled credential; the original key's phishing resistance was never defeated.
+    A weak recovery path can replace a strong login credential without defeating its cryptography.
 
-    **Session bypass:** Alternatively, a copied valid administrator session may permit actions without another key ceremony. Protect recovery/enrollment separately, revoke compromised sessions, and require fresh verified authentication for sensitive operations. If the action changes a payout destination, bind its approval to that exact destination rather than treating any recent login as approval of arbitrary changes.
+    ```text
+    # Unsafe recovery sequence:
+    POST /support/reset-factor  -> profile answers accepted
+    POST /webauthn/register     -> attacker's public key enrolled for Alice
+    POST /login                -> attacker now uses the enrolled credential
+    # Alice's original security key was never cloned or phished.
+    ```
+
+    ```python
+    # Application pseudocode for a sensitive payout operation.
+    session = require_valid_session(request.cookie)
+    authorize(session.user, "payout.change", account)
+    require_recent_verified_authentication(session, max_age_seconds=300)
+    approval = require_server_owned_approval(session.user, request.approval_id)
+    require(approval.action == "payout.change" and approval.account == account.id)
+    require(not approval.expired and not approval.cancelled)
+    require(approval.destination == request.destination)
+    consume_and_execute(approval)  # Coordinate consumption and operation execution.
+    # A new login alone does not approve a different destination supplied afterward.
+    ```
+
+    Recovery, credential enrollment, and session invalidation each need their own controls. The 300-second recency value is illustrative.
 
 **Follow-up:** Would requiring a fresh WebAuthn login prove approval of a particular payout destination? Not unless the design binds and verifies the intended operation; login proof alone does not sign arbitrary transaction parameters.
 
@@ -232,9 +406,26 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** An authorized user with a known UUID from another tenant is denied; their own permitted invoice succeeds. Include list/export endpoints, not just the detail route.
 
 ??? example "Worked example"
-    **Known identifier:** Alice can read invoice `9d2e…` in tenant A. She obtains the UUID of tenant B's invoice from a shared document. Both requests carry a valid `invoice.read` token.
+    A scoped query prevents knowledge of another invoice UUID from becoming authority to read it.
 
-    **Decision:** Resolve Alice's authorized tenant/object relationships server-side and constrain the invoice lookup to them. Tenant B's invoice stays denied even though its identifier is unpredictable and Alice knows it. Apply the same restriction to `/invoices`, exports, and batch lookups; fixing only the detail endpoint leaves alternate access paths.
+    ```python
+    # Application pseudocode; placeholders are bound parameters, not string SQL.
+    tenant = require_authorized_tenant(current_user, request.tenant_id)
+    invoice = db.query_one(
+        "SELECT * FROM invoices WHERE id = :id AND tenant_id = :tenant",
+        {"id": request.invoice_id, "tenant": tenant.id},
+    )
+    if invoice is None:
+        deny_not_found()  # Disclosure policy; authorization still needs enforcement.
+    authorize(current_user, "invoice.read", invoice)  # Ownership/relationship policy.
+    # UUID knowledge and a broad invoice.read scope cannot bypass these restrictions.
+    ```
+
+    ```text
+    Alice / tenant-A / own invoice UUID          -> allowed if policy permits
+    Alice / tenant-B / known foreign invoice UUID -> denied
+    # Run the same cross-tenant test against list, batch, and export routes.
+    ```
 
 **Follow-up:** Should the denial be 403 or 404? Choose a consistent disclosure policy; status choice cannot replace authorization, and timing or other endpoints may still reveal existence.
 
@@ -257,9 +448,29 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** An otherwise permitted update cannot change immutable tenant/ownership fields or elevate global privileges through additional JSON properties.
 
 ??? example "Worked example"
-    **Request:** A tenant-A administrator submits a profile update containing `displayName`, `tenantId: tenant-B`, and `isGlobalAdmin: true`. The route-level role check succeeds because this person can manage ordinary profiles in tenant A.
+    An otherwise legitimate request includes fields the caller must not control.
 
-    **Decision:** Bind only permitted fields such as `displayName`; derive tenant scope from trusted account/policy state. Reject or ignore forbidden properties according to the API contract, while ensuring they cannot change stored authority. Moving an account or granting privileges needs a separate authorized operation. “Administrator” must retain its tenant and action scope.
+    ```json
+    {
+      "displayName": "Alice",
+      "tenantId": "tenant-B",
+      "isGlobalAdmin": true,
+      "ownerId": "another-user"
+    }
+    ```
+
+    ```python
+    # Application pseudocode: do not deserialize the whole request into the DB model.
+    editable = {"displayName"}
+    require(set(request.json) <= editable)  # Example contract: reject unknown fields.
+    profile = load_profile_in_authorized_tenant(current_user, request.profile_id)
+    authorize(current_user, "profile.edit", profile)
+    profile.display_name = validate_display_name(request.json["displayName"])
+    save(profile)
+    # Tenant/owner/global-role changes require separately authorized operations.
+    ```
+
+    A tenant administrator's role does not make privileged model properties editable.
 
 **Follow-up:** Customer support needs to assist tenant A. Preserve the support actor, define its permitted operations, and avoid unrestricted impersonation as the default solution.
 
@@ -283,9 +494,30 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** A direct service request and a request with a forged ingress header fail, while an authenticated, policy-approved gateway call succeeds.
 
 ??? example "Worked example"
-    **Forged assertion:** A compromised reporting workload sends `X-User: administrator` directly to billing. It has a certificate from the organization's CA, but it is not the gateway authorized to assert user identity.
+    The external caller supplies a header that must not become trusted identity.
 
-    **Decision:** Billing rejects this identity assertion. At ingress, the real gateway removes caller-supplied identity headers and inserts only validated identity. Billing authenticates that designated gateway on the internal channel and checks its assertion authority. Merely trusting every CA-issued workload certificate would let unrelated services claim arbitrary users.
+    ```http
+    GET /billing/accounts HTTP/1.1
+    Host: app.example
+    X-User: administrator
+    ```
+
+    ```python
+    # Gateway pseudocode: remove untrusted assertions before forwarding.
+    headers.remove_all("X-User")
+    user = validate_external_credential(request)
+    headers.set("X-User", user.id)
+    forward_over_authenticated_gateway_channel(headers)
+
+    # Billing pseudocode: the authenticated internal peer must be this gateway.
+    require(peer.identity == "spiffe://example/gateway")
+    require(peer.may_assert_users)
+    user = resolve_gateway_asserted_user(request.headers["X-User"])
+    authorize(user, "billing.read", requested_account)
+    # A reporting workload with a different valid CA-issued certificate fails above.
+    ```
+
+    Direct bypass paths must be restricted or enforce equivalent authenticated authority checks. A header string alone never proves who asserted it.
 
 **Follow-up:** If another workload has a certificate from the same CA, can it assert arbitrary users? No; authenticate the expected asserting identity and its permitted authority, not just CA membership.
 
@@ -309,9 +541,28 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** A user denied access to a billing record stays denied through the orders API, even though orders has permissions for other legitimate system tasks.
 
 ??? example "Worked example"
-    **Denied invoice:** Alice may read invoice 42 but not invoice 99. Orders calls billing for invoice 99 using Alice's delegated authority and receives a denial. Orders also possesses an application credential for a legitimate reconciliation job.
+    A service credential must not silently replace denied user authority.
 
-    **Unsafe retry:** Using that reconciliation credential to return invoice 99 to Alice changes the authority and bypasses her restriction. Keep the delegated request denied. If token exchange is used, the issuer must constrain the billing audience and permissions, and billing checks both Alice's entitlement and orders' right to act. A separately authorized reconciliation job is a different operation.
+    ```python
+    # Application pseudocode: unsafe fallback, shown only to identify the bug.
+    result = billing.read(invoice_id, token=user_delegated_token)
+    if result.denied:
+        # BUG: billing now sees application authority instead of the denied user.
+        result = billing.read(invoice_id, token=reconciliation_service_token)
+    return result
+    ```
+
+    ```python
+    # Delegated design: obtain billing-specific authority under enforced STS policy.
+    token = sts.exchange(subject_token=user_token, audience="billing-api",
+                         scope="invoice.read", actor=authenticated_orders_service)
+    result = billing.read(invoice_id, token=token)
+    if result.denied:
+        deny()  # Do not escalate to application-only authority.
+    # Billing checks user entitlement AND the acting service's delegated capability.
+    ```
+
+    The exchange call is conceptual. A real protocol uses the provider's supported token-exchange profile and authenticated service identity; a client cannot merely claim a trusted actor.
 
 **Follow-up:** Which identity belongs in the audit log? Preserve both the affected subject and acting service under the profile, plus the decision and resource; do not overwrite the actor with the user.
 
@@ -334,9 +585,27 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** A trusted signed assertion for another audience, or an unsigned injected assertion beside valid signed content, cannot change the authenticated account.
 
 ??? example "Worked example"
-    **Two assertions:** A response contains assertion A for Alice with a valid trusted signature and an injected unsigned assertion B naming an administrator. The signature library verifies A, but application code selects B through a separate XML search.
+    This deliberately simplified XML illustrates the parser mismatch. It is not a valid SAML response or a reusable attack payload.
 
-    **Decision:** The library's success for A does not authenticate B. Consume the library's validated assertion directly, reject ambiguous structure/IDs, and then check its audience, recipient, times, and request binding. Delivering the same document through an HTTP POST does not fix the mismatch between verified and consumed content.
+    ```xml
+    <Response>
+      <Assertion ID="B"><Subject>administrator</Subject></Assertion>
+      <Assertion ID="A"><Subject>alice</Subject></Assertion>
+      <!-- Verified signature references A, not B; actual XML signature omitted. -->
+      <Signature><Reference URI="#A" /></Signature>
+    </Response>
+    ```
+
+    ```python
+    # Library API names are illustrative.
+    validated = saml_library.validate_response(raw_xml, trusted_configuration)
+    # UNSAFE: user = parse(raw_xml).first_assertion().subject  # Could select B.
+    user = validated.authenticated_assertion.subject         # Consume validated A.
+    # Library validation must also enforce the selected SAML profile's coverage,
+    # audience, recipient, time, request correlation, status, and replay policy.
+    ```
+
+    Use the library's documented validated result. A signature success flag does not authorize a second unrelated XML search.
 
 **Follow-up:** Does POST binding fix this? No; transport binding alone does not ensure the application consumes the correct authenticated content.
 
@@ -359,9 +628,41 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** Change membership, ownership, and export parameters between approval and execution and verify the explicitly chosen policy in each case.
 
 ??? example "Worked example"
-    **Current-entitlement contract:** Alice schedules an export at 16:00 and loses tenant membership at 17:00. The worker runs at 09:00 tomorrow, authenticates as a worker, rechecks Alice's current authority, and denies the export.
+    The queue records a requested operation, not a bearer token pretending to be tomorrow's approval.
 
-    **Durable-approval contract:** A separately authorized business workflow can instead create a protected approval for a fixed invoice set and destination, with explicit expiry/cancellation and survival rules. The worker checks those rules at execution. Changing the destination invalidates that approval; neither an old bearer token nor a caller-supplied `authorized=true` establishes the durable contract.
+    ```json
+    {
+      "requestedBy": "alice", "tenant": "tenant-A", "action": "invoice.export",
+      "invoiceIds": [42, 43], "destination": "approved-bucket", "jobId": "job-8"
+    }
+    ```
+
+    ```python
+    # Current-entitlement contract: application pseudocode at worker execution.
+    authenticate_worker()
+    job = load_server_owned_job("job-8")
+    authorize_current(job.requested_by, job.action, job.invoice_ids, job.tenant)
+    execute_once(job)  # Coordinate final authorization with execution.
+    # Alice removed from tenant-A before execution -> deny under this contract.
+
+    ```
+
+    A different, deliberately durable-approval contract uses a protected approval record instead:
+
+    ```python
+    # Alternative execution contract, not a fallback after current-authority denial.
+    authenticate_worker()
+    job = load_server_owned_job("job-8")
+    approval = load_approval(job.approval_id)
+    require(not approval.expired and not approval.cancelled)
+    require(approval.bound_parameters == job.parameters)
+    check_explicit_survival_rules(approval, job)
+    consume_approval_and_execute_coordinated(approval, job)
+    # Never read approval then execute without guarding a cancellation/replay race.
+    # External side effects also require idempotency/recovery handling.
+    ```
+
+    These are alternative contracts, not two sequential fallbacks. A destination change must not inherit approval for the original destination.
 
 **Follow-up:** Must a permission removal cancel a transaction already committed? Explain the system's execution boundary and business policy instead of promising retroactive revocation.
 
@@ -386,9 +687,28 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** The same subject's allow for tenant A/read cannot authorize tenant B/write; expired policy evidence is handled according to the documented operation-specific outage policy.
 
 ??? example "Worked example"
-    **Cache collision:** At 10:00, policy allows `u7 / tenant-A / invoice-42 / read`. The application stores only `cache[u7] = allow`. During an outage, u7 requests `tenant-B / invoice-99 / write`; the same key produces an incorrect allow.
+    The cache key must distinguish the operation that was actually authorized.
 
-    **Corrected design:** Distinguish every decision-relevant input in the key and set an explicit validity bound. A tenant-A invoice-read entry cannot serve the tenant-B write request. If the correct entry is absent or too old, follow the operation's outage policy; for a high-impact write that requires fresh policy, reject it. A valid JWT signature does not fill the missing authorization evidence.
+    ```python
+    # Application pseudocode: collision in the unsafe design.
+    cache["u7"] = True  # Produced by tenant-A / invoice-42 / read.
+    # Reusing cache["u7"] for tenant-B / invoice-99 / write incorrectly allows it.
+
+    # Example key; include every policy input actually affecting the decision.
+    key = (subject.id, tenant.id, action, resource.id, context.version, policy.version)
+    decision = cache.get(key)
+    if decision is None or now >= decision.valid_until:
+        decision = policy_service.evaluate(subject, tenant, action, resource, context)
+        # Set valid_until from authority evaluation + allowed cache TTL.
+        # Cache hits must not move this deadline; policy versions alone do not
+        # invalidate changed ownership unless the design propagates that change.
+    if decision.unavailable:
+        deny()  # This operation's policy requires fresh evidence on a cache miss.
+    require(decision.allowed)
+    # A matching key can still become stale after membership/ownership changes.
+    ```
+
+    Specify invalidation and maximum cache age as well as the key. An unexpired authentication token cannot replace a missing authorization decision.
 
 **Follow-up:** What would you measure? Cache age, invalidation delay, authorization failures, and outage behavior, without logging raw credentials or sensitive resource contents.
 
@@ -410,9 +730,33 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** Revoke the renewable grant, confirm refresh fails, and separately measure how long a previously copied access token still works.
 
 ??? example "Worked example"
-    **Two thefts:** Access token `A1` expires at 10:05. Refresh credential `R1` belongs to a grant ending at 18:00. A thief holding only `A1` cannot use it at 10:06 if the API enforces expiry. A thief holding usable `R1` may obtain `A2` at the token endpoint, subject to client binding and renewal controls.
+    The refresh endpoint and API accept different credentials, with separate deadlines.
 
-    **Containment:** Revoking the grant stops subsequent refresh attempts. An `A2` already issued can still work until its own acceptance ends unless the API has another invalidation mechanism. The benefit is a centralized renewal control and reduced distribution of the refresh credential, not an assumption that longer-lived secrets are harmless.
+    ```http
+    POST /token HTTP/1.1
+    Host: id.example
+    Content-Type: application/x-www-form-urlencoded
+
+    grant_type=refresh_token&client_id=public-client&refresh_token=R1
+    ```
+
+    ```json
+    {
+      "access_token": "A2", "token_type": "Bearer", "expires_in": 300,
+      "refresh_token": "R2"
+    }
+    ```
+
+    ```text
+    # R1/A2/R2 are readable placeholders, not real token strings.
+    10:00  A1 issued; access-token expiry is 10:05
+    10:04  R1 redeemed -> A2 and replacement R2; A2 expires 10:09
+    10:05  Grant revoked -> subsequent R2 refresh fails under that policy
+    10:06  A2 may still pass API checks until 10:09 without earlier invalidation
+    # Sending R2 to the API is invalid: it is a token-endpoint credential.
+    ```
+
+    This public-client illustration omits confidential-client authentication. Protecting renewal centrally does not make a stolen usable refresh token low risk.
 
 ## 17. Does Refresh-Token Reuse Always Prove Theft?
 
@@ -428,9 +772,28 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** Exercise concurrent calls and a lost refresh response. Verify bounded recovery, no indefinite old-token acceptance, and preservation of the original absolute deadline.
 
 ??? example "Worked example"
-    **Concurrent requests:** At 10:00:00, tabs A and B both hold `R0`. A redeems it first and receives `A1` plus `R1`; the issuer invalidates `R0`. B then submits `R0`, triggering detected reuse. In the described rotation defense, the active refresh credential is revoked because the server cannot reliably distinguish a legitimate race from theft.
+    A legitimate race and theft can produce the same reused-predecessor signal.
 
-    **Prevention and limits:** Coordinate one refresh per grant and securely share the resulting replacement where the architecture requires it. Handle response loss through documented provider behavior rather than blind old-token retries. If the grant's absolute deadline is 18:00, receiving `R1` at 10:00 does not move that fixed deadline; access token `A1` has a separate lifetime.
+    ```text
+    10:00:00.000  Tab A -> POST /token with R0
+    10:00:00.020  Issuer -> A1 + R1; invalidate R0
+    10:00:00.030  Tab B -> POST /token with R0
+    10:00:00.040  Issuer -> invalid_grant; detected reuse revokes active refresh R1
+    # Issuer cannot reliably tell whether Tab B is legitimate or an attacker.
+    # Absolute grant deadline remains 18:00; rotating R0 did not reset it.
+    ```
+
+    ```python
+    # Coordination pseudocode; all consumers of this grant must share the mechanism.
+    with shared_refresh_lock(grant_id):
+        state = token_store.reload(grant_id)  # Do not use a stale tab's token copy.
+        if state.access_token_needs_refresh:
+            response = refresh_using_current_credential(state)
+            token_store.atomic_replace(grant_id, response)
+    # A lost response still needs provider-documented recovery, not blind R0 retries.
+    ```
+
+    A lock local to one tab cannot coordinate another tab or worker. The implementation must match where the credential is shared.
 
 ## 18. Does a Newly Issued ID Token Prove Recent Human Authentication?
 
@@ -446,9 +809,32 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** Refresh an old authenticated grant and confirm it does not silently satisfy recent-authentication policy. Also test session expiry independently of the ID token's expiry.
 
 ??? example "Worked example"
-    **Times:** The user authenticates at 09:00. A refresh at 14:00 returns an ID token with `iat=14:00` and authentication-time evidence still indicating 09:00. The payout operation requires authentication within five minutes.
+    These decoded claims use fixed Unix timestamps; the token itself would also need valid signature and profile checks.
 
-    **Decision:** The evidence is five hours old, so new issuance does not satisfy the action. Obtain and validate sufficiently recent authentication with the required method/context, then bind any approval to the operation. Separately, a local session may remain valid under its own timeout policy even when an earlier ID token has expired; session continuity and payout approval are different decisions.
+    ```json
+    {
+      "iss": "https://id.example", "sub": "alice", "aud": "web-client",
+      "auth_time": 1800000000,
+      "iat": 1800018000,
+      "exp": 1800018300
+    }
+    ```
+
+    ```python
+    # Application pseudocode: validate signature/profile before trusting these claims.
+    claims = validate_id_token(raw_token, expected_issuer, expected_client_id)
+    # In this fixed-clock fixture, now equals issuance, five hours after login.
+    now = 1800018000
+    require("auth_time" in claims)           # Required recency evidence.
+    require(claims["auth_time"] <= now + allowed_clock_skew)  # Reject future evidence.
+    require(now < claims["exp"])                 # Token has not expired.
+    require(now - claims["auth_time"] <= 300)    # Fails: 18000 > 300 seconds.
+    # Checking now - iat would incorrectly treat refresh as recent human login.
+    # Request supported max_age=300 in a new authentication interaction, then
+    # validate returned auth_time and the action's required authentication context.
+    ```
+
+    The application session has independent idle/absolute limits. Passing a recency check also does not bind approval to an arbitrary payout destination.
 
 ## 19. Can an API Accept an Unknown Signing Key During an Issuer Outage?
 
@@ -464,9 +850,29 @@ Answer aloud before expanding the guidance. Each question has separate expandabl
     **Test:** Unknown IDs fail during an outage; random IDs cannot trigger unlimited key-fetch traffic; retirement/compromise policy reaches every verifier within its stated bound.
 
 ??? example "Worked example"
-    **Cached keys:** The API has trusted public key K1. During an issuer outage, an unexpired token signed by K1 can still pass the configured local validation policy. Another token declares `kid=K2`, but K2 is absent from the trusted cache and the configured JWKS refresh fails.
+    An untrusted header can select only within the configured trusted key context.
 
-    **Decision:** Reject the K2 token because its signature cannot be verified under a trusted key. Do not trust a key URL carried in that token or skip signature checks. Planned rotation would publish K2 before using it. If K1 is compromised, merely adding K2 is insufficient: APIs must also stop accepting the affected K1 authority under the incident policy.
+    ```json
+    {
+      "alg": "RS256", "kid": "K2", "typ": "at+jwt"
+    }
+    ```
+
+    ```python
+    # Verifier pseudocode; a maintained library implements actual JOSE verification.
+    header = inspect_untrusted_header(raw_token)
+    require(header["alg"] in configured_algorithms)
+    key = trusted_cache.find(configured_issuer, header["kid"])
+    if key is None:
+        bounded_refresh_from_configured_jwks()  # Rate-limited, coordinated fetch.
+        key = trusted_cache.find(configured_issuer, header["kid"])
+    if key is None:
+        reject_token()  # Outage is not permission to skip signature verification.
+    claims = verify_signature_and_profile(raw_token, key, configured_profile)
+    # Never fetch an arbitrary jku/x5u supplied by this token to establish trust.
+    ```
+
+    Known K1 may still verify appropriate unexpired tokens under cache policy. If K1 is compromised, adding K2 alone does not remove K1's acceptance; distribute explicit rejection of the affected authority.
 
 ## Self-Assessment
 
