@@ -26,10 +26,10 @@
 
 - UDP-based transport developed by Google, used by HTTP/3
 - Built-in TLS 1.3, reduces handshake latency (0-RTT resumption)
-- Multiplexed streams without head-of-line blocking
+- Independent streams avoid TCP's connection-wide ordered-delivery blocking between streams; loss can still block data within a stream and affect shared congestion capacity
 
 !!! info "External Resources"
-    - [RFC 793 - TCP](https://datatracker.ietf.org/doc/html/rfc793) (IETF)
+    - [RFC 9293 - TCP](https://www.rfc-editor.org/rfc/rfc9293.html) (IETF)
     - [RFC 768 - UDP](https://datatracker.ietf.org/doc/html/rfc768) (IETF)
     - [RFC 9000 - QUIC](https://datatracker.ietf.org/doc/html/rfc9000) (IETF)
 
@@ -40,17 +40,17 @@ Overview of major application-layer protocols. Each subsection below covers a pr
 | Protocol | Port(s) | Transport | Primary Use |
 |----------|---------|-----------|------------|
 | HTTP/HTTPS | 80, 443 | TCP (QUIC for HTTP/3) | Web traffic |
-| DNS | 53 | UDP (TCP for zone transfers) | Name resolution |
+| DNS | 53 | UDP and TCP | Name resolution, including TCP retries and transfers |
 | SMTP | 25, 587, 465 | TCP | Email sending |
 | IMAP | 143, 993 | TCP | Email retrieval |
 | POP3 | 110, 995 | TCP | Email retrieval |
 | FTP/SFTP | 21, 22 | TCP | File transfer |
 | SSH | 22 | TCP | Remote access, tunneling |
 | RDP | 3389 | TCP/UDP | Windows remote desktop |
-| LDAP | 389, 636 | TCP/UDP | Directory services |
+| LDAP | 389, 636 | TCP (UDP for CLDAP) | Directory access; protected bind policy required |
 | SNMP | 161, 162 | UDP | Network management |
 | NTP | 123 | UDP | Time synchronization |
-| Syslog | 514 | UDP (TCP with TLS) | Log forwarding |
+| Syslog | 514, 6514 | UDP/514; TLS over TCP/6514 | Log transport; reliability and authentication depend on configuration |
 
 For HTTP/HTTPS details, see [Core Networking - HTTP/HTTPS](index.md#httphttps). For DNS, see the dedicated [DNS page](dns.md).
 
@@ -64,10 +64,10 @@ For HTTP/HTTPS details, see [Core Networking - HTTP/HTTPS](index.md#httphttps). 
 **SMTP (Simple Mail Transfer Protocol):**
 
 - **Port 25** - server-to-server relay (often blocked by ISPs to prevent spam)
-- **Port 587** - client submission with STARTTLS (recommended)
+- **Port 587** - message submission with STARTTLS where configured; require successful upgrade/authenticated TLS before sensitive submission
 - **Port 465** - implicit TLS (SMTPS, re-standardised in RFC 8314)
 - Push-based: client sends to server, server relays to destination MX
-- Security: SPF, DKIM, and DMARC records in DNS validate sender legitimacy
+- SMTP hop encryption, domain sender authentication, and message content safety are independent; SPF/DKIM/DMARC do not prove a message is harmless
 
 **IMAP (Internet Message Access Protocol):**
 
@@ -88,12 +88,22 @@ For HTTP/HTTPS details, see [Core Networking - HTTP/HTTPS](index.md#httphttps). 
 |-----------|-----------|---------|
 | **SPF** | TXT | Lists authorised sending IPs for a domain |
 | **DKIM** | TXT | Cryptographic signature on email headers/body |
-| **DMARC** | TXT | Policy for handling SPF/DKIM failures; reporting |
+| **DMARC** | TXT | Alignment policy for the visible From domain with a passing SPF or DKIM identity; reporting |
+
+**Alignment example:** A message displays `From: billing@example.com`, but its envelope sender and DKIM signing domain are `attacker.example`. SPF can pass for the attacker's domain and DKIM can verify its signature while DMARC still fails alignment with `example.com`. Conversely, an aligned compromised sender can pass DMARC and send malicious content. SPF checks the SMTP envelope/HELO identity; it does not directly authenticate the visible From field. DKIM signs selected headers and body data, not a recipient's assessment of intent.
+
+```text
+Visible From:    billing@example.com
+Envelope sender: sender@attacker.example    # SPF pass for attacker.example
+DKIM d=:         attacker.example           # Signature valid for that domain
+DMARC:           fail                       # Neither identity aligns with example.com
+# Conceptual authentication results, not a captured or complete email message.
+```
 
 !!! info "External Resources"
     - [RFC 5321 - SMTP](https://datatracker.ietf.org/doc/html/rfc5321) (IETF)
     - [RFC 8314 - Email Submission with TLS](https://datatracker.ietf.org/doc/html/rfc8314) (IETF)
-    - [DMARC Overview](https://dmarc.org/overview/) (DMARC.org)
+    - [DMARC Alignment](https://www.rfc-editor.org/rfc/rfc7489.html#section-3.1) (IETF)
 
 ## File Transfer Protocols (FTP, SFTP, SCP)
 
@@ -116,7 +126,7 @@ For HTTP/HTTPS details, see [Core Networking - HTTP/HTTPS](index.md#httphttps). 
 
 - Also runs over **SSH (port 22)**
 - Simple file copy (no directory listing or resume)
-- Being deprecated in favour of SFTP in modern OpenSSH
+- The `scp` command uses SFTP by default starting with OpenSSH 9.0; legacy SCP protocol is a separate compatibility choice, not necessarily the protocol used by that command today
 
 **RPC (Remote Procedure Call):**
 
@@ -134,10 +144,10 @@ For HTTP/HTTPS details, see [Core Networking - HTTP/HTTPS](index.md#httphttps). 
 **SSH (Secure Shell) - Port 22:**
 
 - Encrypted remote shell access, tunneling, and file transfer
-- Handshake: asymmetric encryption negotiates a shared symmetric session key
+- Handshake negotiates key exchange; the server proves its host key and the client verifies it before user authentication. Disabling host-key checks removes protection against an impersonating server
 - Authentication: public key (preferred), password, certificate-based, keyboard-interactive
 - Port forwarding: local (`-L`), remote (`-R`), dynamic SOCKS proxy (`-D`)
-- Hardening: disable root login, disable password auth, use `AllowUsers`/`AllowGroups`, change default port, use `fail2ban`
+- Hardening: restrict administrative reachability, verify host keys, use managed user keys/certificates and required MFA, control root/password login by policy, and keep implementations patched. Alternate ports and failed-login throttling reduce noise/abuse, not authorization requirements
 
 **Telnet - Port 23 (992 for TLS):**
 
@@ -152,6 +162,13 @@ For HTTP/HTTPS details, see [Core Networking - HTTP/HTTPS](index.md#httphttps). 
 - Supports encryption (TLS), NLA (Network Level Authentication)
 - Common brute-force target; mitigate with MFA, VPN gateway, account lockout
 - BlueKeep (CVE-2019-0708) demonstrated critical RDP vulnerabilities
+
+```bash
+# Inspect the expected host key through a trusted provisioning channel first.
+# This example requires an already populated known_hosts file; it will not
+# accept a changed/unknown host key merely to get the connection working.
+ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile=./lab_known_hosts admin@192.0.2.10
+```
 
 !!! info "External Resources"
     - [OpenSSH Manual](https://www.openssh.com/manual.html) (OpenSSH)
@@ -183,11 +200,17 @@ For HTTP/HTTPS details, see [Core Networking - HTTP/HTTPS](index.md#httphttps). 
 - Centralised AAA (Authentication, Authorization, Accounting) for network access
 - Used by VPN concentrators, Wi-Fi controllers, network switches (802.1X)
 - Client-server model: NAS (Network Access Server) proxies auth to RADIUS server
-- Password encrypted with shared secret + MD5 (weak); use RADSEC (RADIUS over TLS) where possible
+- Traditional RADIUS/UDP uses shared-secret/MD5-based constructions and does not encrypt the whole packet. Credential protection depends on the selected method. Use supported protected RADIUS transport (such as RADIUS/TLS), validate server/client identities, and follow current vendor security guidance
 
 !!! info "External Resources"
     - [LDAP Overview - Microsoft](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ldap/lightweight-directory-access-protocol-ldap-api) (Microsoft)
     - [Kerberos Protocol - MIT](https://web.mit.edu/kerberos/) (MIT)
     - [RFC 2865 - RADIUS](https://datatracker.ietf.org/doc/html/rfc2865) (IETF)
+
+!!! info "External Resources"
+    - [OpenSSH 9.0 SFTP Default for scp](https://www.openssh.com/txt/release-9.0) (OpenSSH)
+    - [Syslog over TLS](https://www.rfc-editor.org/rfc/rfc5425.html) (IETF)
+    - [RADIUS over TLS](https://www.rfc-editor.org/rfc/rfc6614.html) (IETF)
+
 
 For SSL/TLS details, see the dedicated [SSL/TLS page](tls.md).

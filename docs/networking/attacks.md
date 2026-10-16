@@ -25,9 +25,9 @@ A PitM attack positions the adversary between two communicating parties, interce
 
 **Defences:**
 
-- TLS everywhere with HSTS preload and certificate pinning (mobile)
+- Correct TLS chain/service-identity validation; HSTS for supported browser HTTPS. Preload and application pinning require explicit rollout/recovery planning
 - PKI and mutual TLS for service-to-service communication
-- DNSSEC and DNS-over-HTTPS/TLS
+- DNSSEC validates signed DNS data; DoH/DoT protects a resolver hop. Neither substitutes for service authentication
 - Static ARP entries or Dynamic ARP Inspection (DAI)
 - 802.1X port-based authentication
 - Network segmentation to limit broadcast domains
@@ -43,7 +43,7 @@ A PitM attack positions the adversary between two communicating parties, interce
 
 - ARP (Address Resolution Protocol) maps IP addresses to MAC addresses on a local network segment
 - Gratuitous ARP: a host announces its own IP-MAC mapping without being asked
-- ARP is stateless and trusts all replies - no built-in authentication
+- ARP has no cryptographic sender authentication; hosts retain neighbor-cache state and acceptance behavior varies by implementation
 
 **ARP spoofing attack:**
 
@@ -62,11 +62,13 @@ A PitM attack positions the adversary between two communicating parties, interce
 
 **Mitigations:**
 
-- **Dynamic ARP Inspection (DAI)** - switch validates ARP packets against DHCP snooping binding table
+- **Dynamic ARP Inspection (DAI)** - switch validates IPv4 ARP against trusted DHCP-snooping bindings or configured policy; correctly configure trust ports and static-host bindings
 - **Static ARP entries** - manual MAC-IP mappings (does not scale)
 - **VLAN segmentation** - limits ARP broadcast scope
 - **ARP monitoring tools** - `arpwatch`, `XArp` detect changes in ARP tables
 - **802.1X** - authenticates devices before granting network access
+
+**TLS boundary:** Poisoning Alice's gateway ARP entry changes where her frames go. If her HTTPS client still validates the intended hostname and trusted chain, an attacker without the appropriate key/certificate cannot simply read or rewrite the protected application stream. The attacker can still deny service, collect metadata, or attack other protocols. Network redirection and cryptographic impersonation are separate steps.
 
 !!! info "External Resources"
     - [ARP Spoofing - MITRE ATT&CK](https://attack.mitre.org/techniques/T1557/002/) (MITRE)
@@ -75,21 +77,21 @@ A PitM attack positions the adversary between two communicating parties, interce
 
 ## DNS Attacks (Exfiltration, Poisoning, Hijacking)
 
-DNS operates primarily over UDP port 53 and is inherently trusting, making it a frequent target.
+DNS commonly uses UDP/TCP port 53; acceptance depends on resolver matching, validation, and policy. See [DNS validation and transport](dns.md#dnssec-dot-and-doh) before treating every DNS message as trusted.
 
 **DNS exfiltration:**
 
 - Data encoded as subdomains: `[encoded_data].attacker.com`
 - Queries resolved by attacker's authoritative nameserver, which extracts the data
-- Bypasses HTTP proxies and most firewalls since DNS is rarely blocked
-- Does not appear in HTTP logs; only visible in DNS query logs
+- Can traverse an approved recursive resolver unless that resolver/egress policy detects or blocks the delegation; enforcement determines whether it succeeds
+- Plain DNS queries are not HTTP requests; correlate resolver, network, and endpoint telemetry. Unauthorized DoH adds a different visibility/control path
 - Detection: monitor for unusually long subdomains, high query volume to single domains, entropy analysis
 
 **DNS cache poisoning (Kaminsky attack):**
 
 - Attacker floods recursive resolver with forged responses before legitimate response arrives
 - If accepted, forged record is cached and served to all clients using that resolver
-- DNSSEC prevents this by cryptographically signing DNS records
+- DNSSEC validation rejects forged covered data when a valid trust chain is required; unsigned delegations and compromised legitimate zone administration have different risks
 - Source port randomisation and transaction ID entropy reduce success probability
 
 **DNS hijacking:**
@@ -102,7 +104,7 @@ DNS operates primarily over UDP port 53 and is inherently trusting, making it a 
 
 - Attacker's DNS server alternates between returning attacker IP and internal IP
 - Browser's SOP check passes on domain name, but requests now hit internal services
-- Mitigate by validating `Host` header, blocking private IPs in DNS responses, using network-level DNS filtering
+- Require service authentication and intended Host/origin handling; constrain reachable destinations and apply resolver/browser protections where supported. DNS-only filtering misses alternative resolvers, cached results, IPv6, and direct paths
 
 **DNS tunneling:**
 
@@ -114,7 +116,7 @@ DNS operates primarily over UDP port 53 and is inherently trusting, making it a 
 
 - Defensive technique: redirect known malicious domains to a controlled server
 - Infected hosts contacting C2 domains get redirected to the sinkhole
-- Identifies compromised internal hosts; blocks C2 communication
+- Supplies investigation leads and disrupts covered DNS-dependent C2 paths; cached answers, direct IPs, alternate resolvers, and benign lookups limit the conclusion
 - See [DNS page](dns.md) for additional DNS architecture details
 
 !!! info "External Resources"
@@ -128,14 +130,14 @@ DNS operates primarily over UDP port 53 and is inherently trusting, making it a 
 
 - Border Gateway Protocol connects autonomous systems (AS) on the internet
 - Routers exchange reachability information (IP prefix announcements)
-- BGP has no built-in authentication - routers trust announcements by default
+- Ordinary BGP updates do not cryptographically prove prefix ownership or the full AS path; session authentication and route-acceptance policy are distinct
 
 **BGP hijacking attack:**
 
-1. Attacker's AS announces a more-specific prefix (e.g., `/25` instead of the legitimate `/24`)
-2. BGP's longest-prefix-match routing causes traffic to flow to the attacker
-3. Attacker can inspect, modify, or drop traffic before optionally forwarding it
-4. Alternatively, announce the exact same prefix from a closer AS (AS path shorter)
+1. An attacker announces a more-specific route, for example a `/24` within a legitimate `/23`, on a path whose peers accept that announcement. Many networks filter IPv4 prefixes longer than `/24`, so acceptance cannot be assumed
+2. After routing policy accepts and installs the route, forwarding's longest-prefix match can direct traffic toward it
+3. The attacker can observe/drop/redirect traffic; correctly authenticated encryption still protects application content unless its trust boundary is also defeated
+4. Announcing the same prefix can compete under BGP selection policy; local preference and other attributes mean shorter AS path is not the only deciding factor
 
 **Real-world incidents:**
 
@@ -149,11 +151,33 @@ DNS operates primarily over UDP port 53 and is inherently trusting, making it a 
 
 | Defence | How it works |
 |---------|-------------|
-| **RPKI (Resource Public Key Infrastructure)** | Cryptographically signs route origin authorizations (ROAs); validators reject invalid announcements |
+| **RPKI origin validation** | Validators obtain validated ROA data; routers classify announcements and apply configured acceptance policy |
 | **BGP Route Filtering** | Configure explicit prefix filters and maximum prefix limits with peers |
 | **IRR (Internet Routing Registry)** | Publish routing policy; peers can build filters from IRR data |
 | **BGPsec** | Path-level cryptographic validation (not widely deployed) |
 | **BGP monitoring** | Services like RIPE RIS, BGPStream, Cloudflare Radar detect anomalous announcements |
+
+### Origin Validation and Its Limits
+
+A **Route Origin Authorization (ROA)** binds a prefix, permitted originating ASN, and maximum prefix length. A relying-party validator produces authenticated origin information; a router compares announcements against it. **Valid** means a covering authorization permits this origin/length; **Invalid** means covering authorization exists but does not permit this combination; **NotFound** means no covering authorization was found. These states do not themselves specify whether the router accepts traffic/routes.
+
+```text
+ROA: prefix=203.0.113.0/24, origin=AS64496, maxLength=25
+203.0.113.128/25 originated by AS64496 -> Valid
+203.0.113.128/25 originated by AS64497 -> Invalid (wrong origin)
+203.0.113.128/26 originated by AS64496 -> Invalid (length exceeds maxLength)
+198.51.100.0/24 with no covering ROA -> NotFound
+# Local validation fixtures using documentation space; Internet import filters
+# may reject these lengths independently. Invalid rejection requires policy.
+```
+
+Origin validation does not authenticate every AS-path hop or eliminate leaks from an authorized origin. Publishing an incorrect maxLength/origin can invalidate legitimate announcements. Test planned more-specific routes, validator/router connectivity, cached-data expiry, and outage policy. A validator reporting an error while a router keeps accepting Invalid routes does not enforce protection.
+
+In RPKI-to-router distribution, successfully received data can be retained during a temporary outage until its expiry deadline. After expiry, the router removes that expired cache data and reevaluates routes against any remaining applicable data; a previously Invalid announcement can become NotFound if no covering authorization remains. The import policy determines the consequence. RFC 8210 starts/resets the expiry interval on an End of Data message, not merely on failed reconnect attempts. Use the negotiated/configured timers and multi-cache behavior rather than promising one universal stale-data lifetime.
+
+!!! info "External Resources"
+    - [BGP Prefix Origin Validation](https://www.rfc-editor.org/rfc/rfc6811.html) (IETF)
+    - [RPKI-to-Router Data Distribution](https://www.rfc-editor.org/rfc/rfc8210.html) (IETF)
 
 !!! info "External Resources"
     - [BGP Hijacking - Cloudflare](https://www.cloudflare.com/learning/security/glossary/bgp-hijacking/) (Cloudflare)
@@ -187,6 +211,8 @@ DNS operates primarily over UDP port 53 and is inherently trusting, making it a 
 | CLDAP | ~56-70x | 389 |
 | CharGen | ~358x | 19 |
 
+Amplification ratios depend on the request, response, deployment, and rate limits; the historical examples above are not universal current capacities. Reflection requires the attacker to make the reflector send replies to the victim, commonly through source-address spoofing. Source-address validation at originating networks reduces that capability; the victim's firewall cannot impose it on every remote network.
+
 **SYN flood:**
 
 - Sends massive volume of SYN packets with spoofed source IPs
@@ -207,6 +233,20 @@ DNS operates primarily over UDP port 53 and is inherently trusting, making it a 
 - **Anycast** - distributes attack traffic across many PoPs
 - **Connection limits** - `max_conns`, timeout tuning, SYN cookies
 - **Application-layer** - CAPTCHA, JavaScript challenges, bot detection
+
+### Match the Defense to the Exhausted Resource
+
+```text
+Internet flood: 10 Gbit/s -> victim uplink capacity: 1 Gbit/s -> host firewall
+# Even if the host drops every attack packet, legitimate packets already lost
+# capacity upstream. Host rules cannot recover that saturated link.
+```
+
+Use upstream filtering/scrubbing or an appropriately provisioned edge for link saturation. SYN cookies reduce some half-open TCP state pressure, not all CPU/socket/application load. Authenticated bot requests can exhaust expensive database work despite successful TCP/TLS; use operation-aware quotas and capacity limits. Per-IP limits can penalize many users behind one NAT and miss a distributed attack. A CDN protects only traffic routed through it: restrict/monitor direct origin access under the provider's supported design.
+
+!!! info "External Resources"
+    - [SYN Floods and Countermeasures](https://www.rfc-editor.org/rfc/rfc4987.html) (IETF)
+    - [Source Address Validation](https://www.rfc-editor.org/rfc/rfc2827.html) (IETF)
 
 !!! info "External Resources"
     - [DDoS Attack Types - Cloudflare](https://www.cloudflare.com/learning/ddos/ddos-attack-tools/ddos-types/) (Cloudflare)
@@ -270,8 +310,8 @@ For tool details, see [Network Security & Tools - Network Scanning](security-too
 1. Attacker generates thousands of frames with random source MAC addresses
 2. CAM table fills to capacity
 3. Switch cannot learn new legitimate entries
-4. All traffic is flooded to all ports, turning the switch into a hub
-5. Attacker can now sniff all traffic on the VLAN segment
+4. Unknown-destination unicast can be flooded within the VLAN according to switch behavior; known destinations may still use learned entries
+5. An attacker may observe traffic delivered to their port, but table exhaustion does not universally expose every frame or defeat TLS encryption
 
 **Tools:** `macof` (dsniff suite), `yersinia`
 
@@ -281,7 +321,7 @@ For tool details, see [Network Security & Tools - Network Scanning](security-too
 |---------|-------------|
 | **Port security** | Limit maximum MAC addresses per port; shut down port on violation |
 | **802.1X** | Authenticate devices before granting port access |
-| **DHCP snooping + DAI** | Validate ARP and DHCP against binding table |
+| **DHCP snooping + DAI** | Complementary protection for DHCP/ARP manipulation, not a direct limit on arbitrary source-MAC flooding |
 | **Private VLANs** | Restrict communication between ports in the same VLAN |
 | **Storm control** | Rate-limit broadcast/multicast/unknown unicast traffic |
 

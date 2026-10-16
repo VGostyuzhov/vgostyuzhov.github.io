@@ -1,8 +1,33 @@
 # Core Networking
 
+Study this page for packet paths and reference facts, then use [DNS](dns.md), [TLS](tls.md), and [segmentation and firewalls](segmentation.md) to understand their enforcement boundaries. [Network protocols](protocols.md), [attacks](attacks.md), and [tools](security-tools.md) connect those mechanisms to operational checks. Finish with the [tricky interview questions](interview-questions.md), which include separate answer and commented-example expanders.
+
+## Follow One HTTPS Request
+
+Assume a workstation `10.0.10.8/24` connects to `api.example`, resolved to documentation address `192.0.2.80`. Its default gateway is `10.0.10.1`. DNS has supplied a destination, not proof of that destination's application identity.
+
+1. The host checks its routing table. Because `192.0.2.80` is outside its directly connected subnet, it selects the gateway rather than trying to resolve the remote server's MAC address.
+2. On Ethernet/IPv4, ARP resolves the gateway's local IP to a MAC address. The outgoing frame's destination MAC is the gateway; its IP destination remains `192.0.2.80`.
+3. Each router forwards toward the IP destination and uses the next link's framing. Firewalls along the path evaluate applicable packet/flow policy. NAT, if configured, rewrites the relevant address/port tuple.
+4. With HTTP/1.1 or HTTP/2 over TLS/TCP, TCP establishes transport state, then TLS authenticates the service and establishes protected traffic keys. HTTP/3 instead uses QUIC over UDP with TLS 1.3 integrated into its handshake.
+5. The receiving application authenticates/authorizes its own operations. A network rule allowing port 443 does not grant access to every API object.
+6. Replies need valid routes and matching policy/state. A successful outbound packet does not prove that the reverse path works.
+
+```text
+Ethernet: src=workstation-MAC, dst=gateway-MAC
+IPv4:     src=10.0.10.8,       dst=192.0.2.80
+TCP:      src=51000,          dst=443
+# MAC addresses describe this link. The destination IP describes the remote host.
+# A NAT gateway may rewrite the source IP/port; it does not authorize the API call.
+```
+
+!!! info "External Resources"
+    - [IPv4 Router Forwarding Requirements](https://www.rfc-editor.org/rfc/rfc1812.html#section-5) (IETF)
+    - [HTTP/3 and QUIC Transport](https://www.rfc-editor.org/rfc/rfc9114.html) (IETF)
+
 ## OSI Model & TCP/IP Stack
 
-The OSI model provides a layered abstraction for network communication. The TCP/IP model is the practical implementation used on the internet.
+The OSI model provides a layered abstraction for network communication. The TCP/IP model describes the Internet protocol suite. Layer placement is a teaching approximation: TLS, ARP, tunnels, and application protocols do not always map neatly to a single OSI layer.
 
 | OSI Layer | Name | Function | TCP/IP Equivalent | Key Protocols |
 |-----------|------|----------|-------------------|---------------|
@@ -41,7 +66,7 @@ The OSI model provides a layered abstraction for network communication. The TCP/
 **Subnetting essentials:**
 
 - Subnet mask divides IP into network and host portions
-- CIDR notation: `/24` = 256 addresses (254 usable), `/16` = 65536 addresses
+- CIDR notation: an IPv4 `/24` contains 256 addresses, ordinarily 254 host addresses; `/31` point-to-point and `/32` host routes have different semantics. IPv6 does not use the IPv4 broadcast/host-count convention.
 - Broadcast address: all host bits set to 1
 - Network address: all host bits set to 0
 
@@ -49,7 +74,7 @@ The OSI model provides a layered abstraction for network communication. The TCP/
 
 - Proper subnetting enables network segmentation and access control
 - Micro-segmentation limits lateral movement after compromise
-- Private addressing combined with NAT hides internal topology
+- Private addresses are not globally routed in the ordinary Internet model, but routed enterprise/VPN paths can still reach them. NAT changes visible tuples; it is not an access-control guarantee. See [segmentation](segmentation.md).
 
 !!! info "External Resources"
     - [Subnetting Practice - Subnet Calculator](https://www.subnet-calculator.com/) (SubnetCalculator)
@@ -61,11 +86,11 @@ The OSI model provides a layered abstraction for network communication. The TCP/
 | Property | TCP | UDP |
 |----------|-----|-----|
 | **Connection** | Connection-oriented (3-way handshake: SYN, SYN-ACK, ACK) | Connectionless |
-| **Reliability** | Guaranteed delivery, ordering, retransmission | Best-effort, no guarantees |
-| **Flow control** | Sliding window, congestion control (throttles on packet loss) | None - sends at application rate |
+| **Reliability** | Reliable ordered byte stream with retransmission; connection failure is still possible | Best-effort, no guarantees |
+| **Flow control** | Sliding window, congestion control (throttles on packet loss) | No built-in flow/congestion control; applications/transports must implement suitable behavior |
 | **Header size** | 20-60 bytes | 8 bytes (source port, dest port, length, checksum) |
 | **Use cases** | HTTP/S, SSH, SMTP, FTP, database connections | DNS queries, VoIP, streaming, DHCP, traceroute, gaming |
-| **Security notes** | SYN flood attacks exploit handshake; stateful firewalls track connections | UDP floods harder to filter; no connection state to track |
+| **Security notes** | SYN flood attacks exploit handshake; stateful firewalls track connections | Firewalls can track UDP tuples and idle timeouts despite the absence of a handshake |
 
 **TCP handshake:**
 
@@ -75,11 +100,11 @@ The OSI model provides a layered abstraction for network communication. The TCP/
 
 **TCP teardown:** `FIN` -> `ACK` -> `FIN` -> `ACK` (four-way close) or `RST` for abrupt termination.
 
-Streaming media over UDP can saturate shared network links, degrading TCP connections on the same path because TCP backs off under congestion while UDP does not.
+A UDP application that sends without congestion control can saturate a shared link. UDP-based protocols such as QUIC implement their own congestion control and reliability. TCP reliability is not authentication: sequence/ACK handling does not prove application identity.
 
 !!! info "External Resources"
     - [TCP vs UDP - Cloudflare](https://www.cloudflare.com/learning/ddos/glossary/tcp-ip/) (Cloudflare)
-    - [RFC 793 - TCP Specification](https://datatracker.ietf.org/doc/html/rfc793) (IETF)
+    - [RFC 9293 - TCP Specification](https://www.rfc-editor.org/rfc/rfc9293.html) (IETF)
     - [RFC 768 - UDP Specification](https://datatracker.ietf.org/doc/html/rfc768) (IETF)
 
 ## Routing & Switching Fundamentals
@@ -103,6 +128,8 @@ Streaming media over UDP can saturate shared network links, degrading TCP connec
 - VLAN tagging (802.1Q) allows trunking between switches
 - VLAN hopping attacks exploit misconfigured trunk ports or double-tagging
 
+**Boundary example:** VLAN 10 and VLAN 20 separate ordinary Ethernet broadcasts. If their gateway routes between them without an ACL/firewall restriction, hosts can still connect across the VLANs. VLAN membership is topology; the [permitted-flow policy](segmentation.md#from-requirements-to-permitted-flows) determines access.
+
 !!! info "External Resources"
     - [BGP Explained - Cloudflare](https://www.cloudflare.com/learning/security/glossary/what-is-bgp/) (Cloudflare)
     - [VLAN Security Best Practices - Cisco](https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst4500/12-2/25ew/configuration/guide/conf/vlans.html) (Cisco)
@@ -112,18 +139,18 @@ Streaming media over UDP can saturate shared network links, degrading TCP connec
 
 **NAT (Network Address Translation):**
 
-- Translates private IP addresses to public IPs for internet access
+- Rewrites addresses, often with ports; common deployments translate private IPv4 sources for Internet access
 - **SNAT/PAT** - many internal hosts share one public IP (most common)
 - **DNAT** - maps external IP/port to internal server (port forwarding)
 - Hides internal network topology from external observers
-- IPv6 was designed to eliminate NAT, though NAT66 exists for edge cases
+- IPv6 commonly uses globally routable addressing without NAT; it still requires explicit ingress/egress policy
 
 **DHCP (Dynamic Host Configuration Protocol):**
 
 - Ports: UDP 67 (server), UDP 68 (client); IPv6 uses ports 546/547
-- Assigns IP address, subnet mask, default gateway, DNS servers
+- DHCPv4 assigns an IPv4 address and options such as subnet mask, default gateway, and DNS servers. DHCPv6 is a different exchange; IPv6 default-router discovery uses Router Advertisements
 
-**DHCP process (DORA):**
+**DHCPv4 process (DORA):**
 
 1. `DHCPDISCOVER` - client broadcasts request
 2. `DHCPOFFER` - server offers an address
@@ -151,7 +178,7 @@ Streaming media over UDP can saturate shared network links, degrading TCP connec
 
 **HTTP (Port 80) / HTTPS (Port 443):**
 
-HTTP is a stateless, text-based request-response protocol. HTTPS wraps HTTP in TLS for confidentiality and integrity.
+HTTP has stateless request/response semantics; HTTP/1.1 uses textual message syntax, while HTTP/2 and HTTP/3 use binary framing. HTTPS adds a protected authenticated connection, not automatic application authorization.
 
 **Request structure:**
 
@@ -199,9 +226,9 @@ Connection: keep-alive
 | 80 | TCP | HTTP | Unencrypted; redirect to 443 |
 | 110 | TCP | POP3 | Cleartext; use 995 (POP3S) |
 | 143 | TCP | IMAP | Cleartext; use 993 (IMAPS) |
-| 389 | TCP/UDP | LDAP | Cleartext; use 636 (LDAPS) |
-| 443 | TCP | HTTPS / TLS | Primary secure web traffic |
-| 465, 587 | TCP | SMTPS / SMTP Submission | Encrypted email submission |
+| 389 | TCP (UDP for CLDAP) | LDAP | Require authenticated TLS for password binds; StartTLS or LDAPS by policy |
+| 443 | TCP/UDP | HTTPS | TCP for HTTP/1.1 and HTTP/2; UDP for HTTP/3 |
+| 465, 587 | TCP | SMTP submission | 465 implicit TLS; 587 must enforce successful STARTTLS when required |
 | 993 | TCP | IMAPS | Encrypted IMAP |
 | 995 | TCP | POP3S | Encrypted POP3 |
 | 3306 | TCP | MySQL | Bind to localhost; use TLS |
@@ -211,9 +238,9 @@ Connection: keep-alive
 
 **Port ranges:**
 
-- **0-1023** - Well-known (privileged); require root/sudo to bind
+- **0-1023** - System/well-known ports; binding privilege is OS/configuration dependent (Linux can use capabilities or a configured unprivileged-port boundary)
 - **1024-49151** - Registered; used for IANA-registered services
-- **49152-65535** - Dynamic/ephemeral; used for client-side connections
+- **49152-65535** - IANA dynamic/private range; actual ephemeral ranges are OS/configuration dependent
 
 !!! info "External Resources"
     - [IANA Service Name and Transport Protocol Port Number Registry](https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml) (IANA)

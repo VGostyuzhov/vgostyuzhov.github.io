@@ -38,6 +38,8 @@ nav:
     - SSL/TLS: networking/tls.md
     - Network Security & Tools: networking/security-tools.md
     - Network Attacks: networking/attacks.md
+    - Segmentation & Firewalls: networking/segmentation.md
+    - Tricky Interview Questions: networking/interview-questions.md
   - Web Application Security:
     - web-security/index.md
     - Web Vulnerabilities: web-security/vulnerabilities.md
