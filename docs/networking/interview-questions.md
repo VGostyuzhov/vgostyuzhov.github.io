@@ -1,63 +1,79 @@
 # Tricky Network Security Interview Questions
 
-Fourteen scenarios test packet paths, trust boundaries, state, timing, and measurement. Read [core networking](index.md), then the linked teaching sections. Explain the mechanism before expanding the answer. Each worked example is a separate expander with commented commands, configuration, code, or protocol traces.
+Fourteen scenarios combine seven cloud/Kubernetes networking questions with seven core questions on DNS, TLS, state, and availability. Read [core networking](index.md), then the linked teaching sections. Explain the mechanism before expanding the answer. Each worked example is a separate expander with commented commands, configuration, code, or protocol traces.
 
 Examples use documentation addresses and synthetic data. Commands are templates for an explicitly authorized lab, not reports of live scans. Pseudocode and conceptual configurations are labeled; no firewall changes or attack traffic are executed by this page.
 
-## 1. Do Separate VLANs Prove the Database Is Isolated?
+## 1. Why Can an AWS Security Group Allow a Connection While a NACL Breaks It?
 
-**Study first:** [Permitted flows](segmentation.md#from-requirements-to-permitted-flows) and [routing](index.md#routing-switching-fundamentals).
+**Study first:** [Cloud security groups and subnet ACLs](segmentation.md#cloud-security-groups-and-subnet-acls).
 
-**Scenario:** A workstation VLAN and database VLAN use different subnets. Their gateway routes between them and permits all traffic. Is the database isolated from workstations?
-
-??? note "Answer guidance and common trap"
-    No. The VLAN separates ordinary Layer-2 broadcasts; the gateway still provides a routed path. Identify where a policy evaluates workstation-to-database traffic and require a deny there, while permitting only the actual application/management contracts. Database authentication and authorization remain necessary even on permitted paths.
-
-    **Trap:** A topology diagram is treated as an enforced access policy.
-
-    **Test:** A workstation connection to the database fails while the authorized application connection succeeds, on both intended address families and alternate paths.
-
-??? example "Worked example"
-    Illustrative flow policy, not vendor-specific syntax:
-
-    ```text
-    workstation 10.0.10.8 -> DB 10.0.30.9:5432/TCP -> DENY at inter-zone firewall
-    application 10.0.20.8 -> DB 10.0.30.9:5432/TCP -> ALLOW new + matching replies
-    # Two different source subnets still need different enforced decisions.
-    # DB also validates the application's identity and database permissions.
-    ```
-
-    Changing the workstation's VLAN should not be sufficient to obtain database access; test the actual routing and enforcement rather than the label alone.
-
-**Follow-up:** What if both services share a host or container bridge? Locate the actual input/forwarding path and enforce the same contract there.
-
-## 2. Can a Firewall Track UDP Without a Handshake?
-
-**Study first:** [Stateful filtering](segmentation.md#stateful-and-stateless-filtering) and [DNS response matching](dns.md#basics-and-core-concepts).
-
-**Scenario:** A DNS client sends a UDP query and its reply passes a stateful firewall. A much later reply is dropped after an idle timeout. Is the firewall treating UDP as TCP?
+**Scenario:** An EC2 database security group allows an application to connect on TCP/5432. The database subnet NACL allows incoming TCP/5432 but denies outgoing client ephemeral ports. Why does the connection still fail?
 
 ??? note "Answer guidance and common trap"
-    No. The firewall can retain UDP tuple/reply state and an idle timeout without a UDP transport handshake. A packet can match a permitted flow before that state expires; after expiry it can be evaluated as unsolicited/new traffic. Neither result proves the DNS response is authentic or the application accepted it.
+    Security groups and NACLs are independent enforcement points. The stateful security group permits matching replies to an allowed request; the stateless NACL still evaluates the reply as traffic leaving the subnet. Its rule must cover the actual reply destination port, not just the database's listening port. Also inspect routes, the client's subnet boundary, other security groups, and the host/application.
 
-    **Trap:** “Connectionless” is interpreted as “no state can exist anywhere.”
+    **Trap:** “Stateful security group” is assumed to make every filter on the path stateful.
 
-    **Test:** Observe the original tuple, reverse tuple, timeout, and counters; repeat within and beyond the configured timeout.
+    **Test:** Trace the SYN and SYN/ACK tuples and inspect both subnet-boundary decisions. Permit only the necessary return ranges under the actual client configuration, then retest the intended application path.
 
 ??? example "Worked example"
-    Annotated packets using documentation addresses and an illustrative timeout:
+    Illustrative AWS rule decisions, not an importable rule file. Assume routes, source-side controls, and the database listener otherwise permit the flow.
 
     ```text
-    00:00  192.0.2.8:53000 -> 192.0.2.53:53/UDP  # Allowed query creates flow state
-    00:01  192.0.2.53:53 -> 192.0.2.8:53000/UDP  # Matching reply accepted
-    00:40  Same reverse tuple                   # State expired under 30s idle policy
-    # With unsolicited inbound denied, the late packet can now fail policy.
-    # A new query/source port creates a different flow; no TCP SYN is involved.
+    App 10.0.1.8:51000 -> DB 10.0.2.9:5432/TCP SYN
+      DB security group: inbound 5432 from approved app -> allow
+      DB-subnet NACL:    inbound destination 5432      -> allow
+    DB 10.0.2.9:5432 -> App 10.0.1.8:51000/TCP SYN,ACK
+      DB security group: matching reply               -> allow by state
+      DB-subnet NACL:    outbound destination 51000    -> deny if not allowed
+    # A NACL outbound rule for destination 5432 does not match this reply.
+    # Use actual client ephemeral ranges; do not assume one universal range.
     ```
 
-    The actual timeout and refresh-on-packet behavior are implementation/configuration dependent.
+    Security-group allow rules aggregate; a narrower extra group cannot cancel a broader group's allow. NACLs instead evaluate ordered allow/deny rules at the subnet boundary.
 
-**Follow-up:** Would an attacker-controlled matching DNS packet necessarily be a valid answer? Explain DNS transaction/validation checks separately from firewall flow matching.
+**Follow-up:** Would a private subnet or a cloud private endpoint authorize every database/service operation? No; routing and private reachability are separate from IAM and application permissions.
+
+## 2. Does IMDSv2 Make an EKS Pod Unable to Obtain the Node Role?
+
+**Study first:** [Instance metadata and workload identity](segmentation.md#instance-metadata-and-workload-identity).
+
+**Scenario:** An EKS node requires IMDSv2, and a pod has its own IRSA role. The compromised pod can still reach node metadata and perform arbitrary HTTP requests. Is the node role automatically isolated from it?
+
+??? note "Answer guidance and common trap"
+    No. IMDSv2 requires a metadata session-token exchange; it is not application-specific IAM authorization. A process able to perform the required PUT and subsequent requests can still access available metadata through a permitted path. Configuring IRSA does not itself block other credential sources, and hostNetwork changes the path assumptions.
+
+    Use tested metadata restrictions, least-privilege node roles, and supported workload identities. Security groups/NACLs do not filter EC2 IMDS traffic. The PUT response hop limit affects token delivery across hops and container compatibility, not the caller's IAM identity.
+
+    **Trap:** IMDSv2 or an assigned workload role is treated as proof that no other role is reachable.
+
+    **Test:** In an authorized test environment, check configuration and harmless metadata reachability from each relevant pod mode without reading or logging live role credentials.
+
+??? example "Worked example"
+    Synthetic configuration and request trace; no live metadata token or IAM credentials are shown.
+
+    ```json
+    {
+      "MetadataOptions": {
+        "HttpEndpoint": "enabled", "HttpTokens": "required",
+        "HttpPutResponseHopLimit": 1
+      }
+    }
+    ```
+
+    ```text
+    Tokenless GET -> metadata denied when tokens are required
+    Permitted PUT /latest/api/token -> metadata session token
+    Permitted GET + that token     -> metadata can be returned
+    # The metadata session token is not the pod's IRSA credential or an IAM scope.
+    # Hop limit 1 can affect an extra routed pod hop; hostNetwork may avoid that hop.
+    # Treat the node's available role as another capability to isolate and minimize.
+    ```
+
+    This scenario assumes the token-response path actually works; requiring IMDSv2 alone does not demonstrate that it cannot.
+
+**Follow-up:** What if IPv4 metadata is blocked but the IPv6 endpoint is enabled? Validate both configured paths and the actual SDK credential selection.
 
 ## 3. Why Did a Deny Rule Leave an Existing Connection Alive?
 
@@ -189,34 +205,45 @@ Examples use documentation addresses and synthetic data. Commands are templates 
 
 **Follow-up:** What changes when a browser uses an unauthorized DoH resolver? Reassess endpoint policy, egress paths, and available telemetry.
 
-## 7. Does ARP Poisoning Automatically Decrypt HTTPS?
+## 7. Why Did a Kubernetes Default-Deny Policy Change Nothing?
 
-**Study first:** [ARP and TLS boundaries](attacks.md#arp-spoofing-cache-poisoning) and [service identity](tls.md#service-identity-validation).
+**Study first:** [NetworkPolicy enforcement and directions](segmentation.md#kubernetes-networkpolicy-enforcement).
 
-**Scenario:** An attacker makes a workstation send gateway traffic through their MAC address. The workstation uses correct HTTPS validation. Can the attacker replace the application response at will?
+**Scenario:** The API server accepts a default-deny NetworkPolicy in namespace payments, but new ordinary pod-to-pod connections still succeed. Does successful YAML creation prove isolation?
 
 ??? note "Answer guidance and common trap"
-    The attacker controls delivery, not automatically the authenticated TLS endpoint or its keys. They can drop/relay packets and observe exposed metadata. Impersonating the intended HTTPS service still requires defeating its chain/name/protocol validation or compromising an accepted key/trust context. ARP protections reduce the redirection path; TLS independently limits plaintext manipulation.
+    No. The networking implementation must support and enforce NetworkPolicy. Confirm that capability first, then verify namespace, target selectors, directions, and other applicable policies. Standard policies combine permits, so a broad allow can reopen access even when a default-deny object exists.
 
-    **Trap:** An on-path network position is treated as possession of application traffic keys.
+    **Trap:** An API object is mistaken for evidence that the dataplane enforced it.
 
-    **Test:** A controlled redirected connection must reject a wrong-name/untrusted certificate while an authenticated unchanged path succeeds.
+    **Test:** Use fresh allowed/denied connections from named test pods on same-node and cross-node paths. Check both source egress and destination ingress where isolated; inspect hostNetwork and existing-flow cases separately.
 
 ??? example "Worked example"
-    Annotated forwarding fixture:
+    A complete baseline policy for a lab namespace that already exists:
 
-    ```text
-    Before: gateway 10.0.10.1 -> MAC 02:00:00:00:00:01
-    After:  gateway 10.0.10.1 -> MAC 02:00:00:00:00:66  # Poisoned local mapping
-    IP destination remains api.example's resolved address.
-    TLS reference identity remains api.example.
-    Attacker presents attacker.example certificate -> hostname validation fails.
-    # ARP itself has no certificate; the TLS rejection happens at a different layer.
+    ```yaml
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: default-deny
+      namespace: payments
+    spec:
+      podSelector: {}  # Select every pod in payments, not every pod in the cluster.
+      policyTypes: [Ingress, Egress]
+      ingress: []
+      egress: []
+    # Effective only with a supporting network implementation.
+    # Other matching policies can still add allowed traffic.
     ```
 
-    DAI depends on correct trusted bindings/ports and static-host handling; admitting a device through 802.1X does not make its ARP assertions universally trustworthy.
+    ```bash
+    # Read-only inspection templates for an authorized lab context.
+    kubectl -n payments get networkpolicy -o yaml
+    kubectl -n payments get pods -o wide --show-labels
+    # Stored YAML and labels help diagnose intent; packet tests demonstrate enforcement.
+    ```
 
-**Follow-up:** Can the attacker still cause an outage without decrypting? Yes; confidentiality and availability have different failure paths.
+**Follow-up:** If only Ingress is isolated, does that deny new outgoing pod connections? No; Egress isolation is independent, and the destination may have its own ingress policy.
 
 ## 8. Why Reject a Certificate with a Valid Trusted Chain?
 
@@ -282,34 +309,55 @@ Examples use documentation addresses and synthetic data. Commands are templates 
 
 **Follow-up:** Does forward secrecy automatically cover early data? No; analyze PSK and ephemeral-DH modes separately.
 
-## 10. Does Publishing a ROA Make Routers Reject a Hijack?
+## 10. Did One YAML Dash Open Access from the Wrong Kubernetes Namespace?
 
-**Study first:** [Origin validation](attacks.md#origin-validation-and-its-limits).
+**Study first:** [NetworkPolicy selectors and additive rules](segmentation.md#kubernetes-networkpolicy-enforcement).
 
-**Scenario:** A prefix owner publishes a correct ROA. A router classifies a wrong-origin route as Invalid but keeps accepting it. Is RPKI broken?
+**Scenario:** An engineer intends to allow payments only from app=checkout pods in namespace frontend. They place namespaceSelector and podSelector in separate from-list entries. What did they allow instead?
 
 ??? note "Answer guidance and common trap"
-    The classification can be correct while enforcement policy is missing. Validators distribute authenticated origin information; routers apply a configured route-acceptance policy. ROA origin/maxLength mistakes can also invalidate legitimate advertisements. Origin validation does not authenticate the entire AS path or prevent every route leak.
+    Separate peer entries are alternatives. One entry permits the selected frontend namespace; the standalone podSelector entry selects matching pods in the policy's own namespace, payments. Put both selectors in one peer to require their intersection. Also audit other applicable policies: a narrower policy cannot override a separate broad allow.
 
-    **Trap:** Publishing cryptographic evidence is equated with every recipient enforcing it.
+    **Trap:** Similar indentation is assumed to express the same boolean condition.
 
-    **Test:** Observe classification and actual route installation/forwarding separately, including expected more-specific announcements and validator outages.
+    **Test:** A frontend checkout pod is permitted, while a frontend non-checkout pod and a payments checkout pod are not permitted by this intended ingress rule. Assume other directional/transport prerequisites are satisfied when testing the selector distinction.
 
 ??? example "Worked example"
-    Documentation fixtures:
+    Complete ingress policy; assumes a supporting implementation, trustworthy labels, and no other broad allow:
 
-    ```text
-    ROA: 203.0.113.0/24, AS64496, maxLength=25
-    203.0.113.128/25 from AS64497 -> Invalid (origin mismatch)
-    203.0.113.128/26 from AS64496 -> Invalid (length too specific)
-    203.0.113.128/25 from AS64496 -> Valid
-    # Policy needed: reject Invalid routes under the deployment's chosen design.
-    # NotFound is a separate state, not synonymous with Invalid or malicious.
+    ```yaml
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: checkout-to-payments
+      namespace: payments
+    spec:
+      podSelector:
+        matchLabels: {app: payments}
+      policyTypes: [Ingress]
+      ingress:
+        - from:
+            - namespaceSelector:
+                matchLabels: {kubernetes.io/metadata.name: frontend}
+              podSelector:  # Same peer: namespace AND pod selector must match.
+                matchLabels: {app: checkout}
+          ports:
+            - protocol: TCP
+              port: 8080
     ```
 
-    A valid origin on a forged or leaked path still requires other routing defenses; do not present ROV as full-path authentication.
+    ```yaml
+    # Incorrect replacement for the from field above (fragment, not a whole policy):
+    from:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: frontend}
+      - podSelector:  # Second peer: OR, scoped to payments for this standalone selector.
+          matchLabels: {app: checkout}
+    ```
 
-**Follow-up:** If a validator becomes unreachable, how long is cached data used? Explain the actual router/cache-expiry and outage policy, not a universal timer.
+    Protect permissions to change workload labels, create matching pods, and edit policies; a label match is not cryptographic service-account identity.
+
+**Follow-up:** Would adding default-deny after the broad allow fix it? No; standard NetworkPolicy permits are additive rather than ordered deny-overrides.
 
 ## 11. Why Did Host DDoS Filtering Not Restore Availability?
 
@@ -343,101 +391,135 @@ Examples use documentation addresses and synthetic data. Commands are templates 
 
 **Follow-up:** Why can per-IP limits harm legitimate users? Shared NAT aggregates users, while distributed attackers can spread requests across sources.
 
-## 12. Does a Full-Tunnel VPN Prevent Every DNS and IPv6 Leak?
+## 12. Why Did Default-Deny Egress Break Kubernetes Service Discovery?
 
-**Study first:** [Tunnel boundaries](security-tools.md#trace-tunnel-boundaries).
+**Study first:** [DNS under egress isolation](segmentation.md#dns-under-egress-isolation) and [DNS transport](dns.md#basics-and-core-concepts).
 
-**Scenario:** A VPN installs an IPv4 default route. The client retains an IPv6 Internet route and a local DNS resolver; disconnect restores the normal IPv4 route. Has a no-leak policy been demonstrated?
-
-??? note "Answer guidance and common trap"
-    No. Inspect the actual routes and resolver policy for each relevant address family and state. A full-tunnel label does not prove IPv6, DNS, exceptions, or disconnect races are covered. A no-leak policy requires enforced rejection when the intended tunnel is unavailable. Service authorization remains necessary beyond the gateway.
-
-    **Trap:** An interface being “connected” is treated as proof that all traffic uses it.
-
-    **Test:** Compare IPv4/IPv6/DNS paths at startup, connected operation, failure, reconnect, and failover.
-
-??? example "Worked example"
-    Linux read-only inspection templates:
-
-    ```bash
-    ip route get 192.0.2.80         # Which interface/source will IPv4 use?
-    ip -6 route get 2001:db8::80    # Which interface/source will IPv6 use?
-    resolvectl status              # Resolver/link routing on systemd-resolved hosts.
-    # Repeat after an authorized lab disconnect; do not rely on the IPv4 default alone.
-    ```
-
-    ```text
-    IPv4 -> tunnel0  | IPv6 -> ordinary interface | DNS -> local resolver
-    # This observation contradicts a policy requiring all three to stay in the VPN.
-    ```
-
-    The gateway terminates VPN protection; correctly validated HTTPS can still protect content on the remaining path.
-
-**Follow-up:** Can a VPN gateway read every HTTPS payload? Not merely by routing it; distinguish protected application TLS from tunnel metadata and termination.
-
-## 13. Does the Correct Enterprise Wi-Fi SSID Authenticate the Network?
-
-**Study first:** [EAP server validation](security-tools.md#enterprise-wi-fi-server-validation).
-
-**Scenario:** A laptop sees the corporate SSID, but the EAP server presents an unexpected certificate. A user is asked to accept it to restore connectivity. Is that safe?
+**Scenario:** An application has default-deny egress plus an allow for its database port. It can reach a test database address directly but cannot resolve the database Service name. What path is missing?
 
 ??? note "Answer guidance and common trap"
-    The SSID is not proof of authentication-server identity. Provision expected trust roots/names and enforce validation without ad hoc user override. In tunneled password methods, authenticate the server before sending inner credentials. EAP-TLS client authentication and network authorization are separate parts of the design.
+    The application needs its actual resolver path as well as database traffic. For a conventional CoreDNS pod path, allow the right destination and both UDP/53 and TCP/53. A Service address may be translated before or after policy evaluation depending on implementation. NodeLocal DNSCache can use another pod-facing address/path, so copying a CoreDNS selector is not sufficient for every cluster.
 
-    **Trap:** A familiar network label or encrypted radio link is assumed to authenticate the intended enterprise server.
+    **Trap:** Allowing the final service port is assumed to permit its prerequisite DNS query.
 
-    **Test:** A copied SSID with wrong server identity fails before sensitive inner authentication or admission.
+    **Test:** Inspect the pod's resolver configuration and destination labels/path, then test resolution and the application connection separately. A DNS permit neither prevents DNS exfiltration nor authorizes all resolved destinations.
 
 ??? example "Worked example"
-    Conceptual provisioning requirements, not an importable platform profile:
+    Additional DNS permit for an egress-isolated application. Assumes ordinary CoreDNS pods in kube-system with label k8s-app=kube-dns and a plugin/path where this selector matches; verify these facts in the lab.
 
     ```yaml
-    ssid: CorpNet
-    server_validation:
-      trusted_ca: enterprise-authentication-ca
-      allowed_names: [radius.example.com]
-      allow_user_override: false
-    # Configure through the managed platform's actual EAP profile schema.
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: app-dns-egress
+      namespace: payments
+    spec:
+      podSelector:
+        matchLabels: {app: payments}
+      policyTypes: [Egress]
+      egress:
+        - to:
+            - namespaceSelector:
+                matchLabels: {kubernetes.io/metadata.name: kube-system}
+              podSelector:
+                matchLabels: {k8s-app: kube-dns}
+          ports:
+            - {protocol: UDP, port: 53}
+            - {protocol: TCP, port: 53}  # Larger/truncated answers may need TCP.
+    # Existing database egress permit is separate; this rule does not grant it.
     ```
 
-    ```text
-    Observed: SSID=CorpNet, certificate for radius.attacker.example
-    Expected: radius.example.com under the provisioned trust policy
-    Decision: reject, do not ask users to make an unfamiliar trust exception
-    ```
+    With NodeLocal DNSCache, inspect the resolver address and enforced path instead of assuming this manifest covers it. Avoid broad all-destination port-53 access merely to make name resolution work.
 
-**Follow-up:** Does WPA3-Personal SAE configure this Enterprise EAP policy? No; distinguish authentication modes and data-protection negotiation.
+**Follow-up:** Can standard NetworkPolicy permit HTTPS only to api.vendor.example by hostname? Not directly; choose supported FQDN-aware enforcement or an explicitly constrained proxy, and account for DNS and address changes.
 
-## 14. Does a Silent Scan Prove a Port Is Closed?
+## 13. Does Strict Mesh mTLS Stop Every Other Service from Calling Payments?
 
-**Study first:** [Measurement limits](security-tools.md#interpret-results-before-changing-policy), [scan semantics](security-tools.md#network-scanning), and [capture versus display filtering](security-tools.md#observation-point-and-encryption).
+**Study first:** [Mesh identity versus authorization](segmentation.md#mesh-identity-and-traffic-entry-points).
 
-**Scenario:** A UDP scan receives no reply. An ACK scan reports unfiltered. Can you conclude the service is closed or that application access is allowed?
+**Scenario:** An Istio sidecar-mode payments workload requires STRICT mTLS. Another enrolled workload has a valid mesh certificate and calls it successfully. Did mTLS fail?
 
 ??? note "Answer guidance and common trap"
-    Neither conclusion follows. UDP silence can mean filtering, loss, rate limiting, or an open service that ignores the probe. ACK scanning maps filter behavior, not application listening state. Even TCP connect success does not establish application authorization. Correlate controlled probes with listeners, routes, counters, and captures from appropriate points.
+    Not necessarily. STRICT requires authenticated protected transport on covered paths; it does not by itself restrict callers to the intended workload identity or operation. Attach an applicable AuthorizationPolicy and verify the actual sidecar interception/policy path. Where no ALLOW policy applies, Istio does not impose a caller allow-list merely because STRICT is enabled. Where an ALLOW policy applies, a request must match an applicable allow after other policy evaluation.
 
-    **Trap:** A tool's observation is promoted into a stronger security claim than the probe can support.
+    **Trap:** Every authenticated mesh principal is treated as an authorized caller.
 
-    **Test:** Use a known responsive lab service as a positive control and a denied path as its counterpart; state the vantage and probe type.
+    **Test:** An approved workload/method/path succeeds, a different valid mesh principal is denied, and plaintext fails on the covered path. Application tenant/object checks remain separate.
 
 ??? example "Worked example"
-    Commands are templates for an explicitly authorized lab host:
+    Istio sidecar-mode HTTP example. Assumes destination labels app=payments, HTTP port 8080, the cluster.local trust domain, and no other broad ALLOW policy. Ambient/waypoint configuration requires separate treatment.
+
+    ```yaml
+    apiVersion: security.istio.io/v1
+    kind: PeerAuthentication
+    metadata:
+      name: payments-mtls
+      namespace: payments
+    spec:
+      selector:
+        matchLabels: {app: payments}
+      mtls:
+        mode: STRICT  # Require mTLS; not an application caller allow-list.
+    ---
+    apiVersion: security.istio.io/v1
+    kind: AuthorizationPolicy
+    metadata:
+      name: checkout-charge
+      namespace: payments
+    spec:
+      selector:
+        matchLabels: {app: payments}
+      action: ALLOW
+      rules:
+        - from:
+            - source:
+                principals: [cluster.local/ns/frontend/sa/checkout]
+          to:
+            - operation:
+                ports: ["8080"]
+                methods: [POST]
+                paths: [/charge]
+    # Principal comes from authenticated peer identity, not a caller-supplied header.
+    ```
+
+    A different certificate-valid mesh service fails this allow rule. An approved checkout service still cannot charge an arbitrary user's account without the application's own authorization.
+
+**Follow-up:** What if a workload or excluded port bypasses interception? Verify coverage and complementary network/backend controls; a policy YAML object alone does not prove enforcement on every path.
+
+## 14. Can an Old LoadBalancer Service Bypass a New Kubernetes Gateway?
+
+**Study first:** [Mesh and traffic entry points](segmentation.md#mesh-identity-and-traffic-entry-points) and [direct-origin paths](attacks.md#match-the-defense-to-the-exhausted-resource).
+
+**Scenario:** A new Ingress/Gateway controller enforces login and WAF checks. An old externally reachable LoadBalancer Service still forwards directly to the same application. Its DNS name was removed. Is the gateway now the only entry point?
+
+??? note "Answer guidance and common trap"
+    No. The old listener/address can remain reachable without its DNS name. The gateway's controls apply to requests traversing that gateway, not to all possible backend paths. Inventory Services, cloud load balancers, relevant NodePorts, node reachability, and backend policy. Remove or restrict unintended paths while retaining independent application authentication/authorization.
+
+    **Trap:** Routing new users through a gateway is assumed to force all callers through it.
+
+    **Test:** The intended gateway path works with its required credentials, while an authorized external test against the old address/port cannot bypass the security contract. NodePort existence alone does not prove public reachability; confirm the attacker's vantage and cloud/node rules.
+
+??? example "Worked example"
+    Read-only inventory templates; these do not remove or change resources:
 
     ```bash
-    nmap -sT -p 443 --reason 192.0.2.10
-    nmap -Pn -sT -p 443 --reason 192.0.2.10  # Skip discovery, not service policy.
-    # Compare endpoint listener/rule counters and captures with the probe result.
+    kubectl get services -A -o wide
+    kubectl get ingress -A
+    # Gateway API resources exist only where the CRDs/controller are installed.
+    kubectl get gateways.gateway.networking.k8s.io -A
     ```
 
     ```text
-    TCP SYN -> SYN/ACK   # Supports open under this probe/vantage.
-    TCP SYN -> RST       # Supports closed under this probe/vantage.
-    UDP probe -> silence # Open-or-filtered can be appropriate; not proof of closed.
-    ACK -> RST          # Can support unfiltered; does not prove an open application.
+    Intended: external client -> gateway:443 -> ClusterIP Service -> app
+    Bypass:   external client -> old public LoadBalancer:443 -----> app
+    # This fixture assumes old-LB reachability was confirmed from that vantage.
+    # Removing a DNS record does not close the listener or a remembered address.
+    # Also inspect provider-specific target/node ports and any remaining direct path.
     ```
 
-**Follow-up:** Can a packet display filter recover packets excluded during capture? No; capture selection precedes display filtering.
+    Some load-balancer implementations allocate NodePorts; supported implementations can avoid that. Check actual allocation, reachability, and forwarding rather than assuming one universal topology.
+
+**Follow-up:** Does preserving the client IP make X-Forwarded-For trustworthy? No; validate the proxy chain and strip/untrust caller-supplied identity headers according to the enforced path.
 
 ## Self-Assessment
 

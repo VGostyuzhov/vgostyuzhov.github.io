@@ -134,3 +134,99 @@ A rule rollout is not complete when one configuration file changes. Account for 
 For example, a new-connection deny propagated in 10 seconds can still leave a database connection accepted by existing-flow rules. A requirement to stop all access in 30 seconds must include state/session termination and enforcement in every path. Network removal also cannot undo a transaction already committed.
 
 Use a small expected-flow matrix: permitted path, denied sibling path, direct bypass, existing connection after change, IPv4, IPv6, failover, and outage. Observe rule counters and endpoint responses. A scan reporting “filtered” is evidence from one vantage point; it is not proof of universal isolation. See [measurement limits](security-tools.md#interpret-results-before-changing-policy) and [interview exercises](interview-questions.md).
+
+## Cloud Security Groups and Subnet ACLs
+
+Cloud controls have provider-specific semantics; do not translate one product's rule behavior into another's by name alone. In AWS, **security groups** supply stateful allow rules at associated resources/interfaces. Matching replies to allowed traffic do not need a separate reverse security-group allow. **Network ACLs (NACLs)** filter traffic entering/leaving a subnet with ordered allow/deny rules and no connection tracking. They therefore need appropriate return-path rules too. A valid security-group decision does not bypass a denying NACL, route, host filter, or application check.
+
+```text
+Client 10.0.1.8:51000 -> DB 10.0.2.9:5432/TCP
+DB-subnet NACL ingress: allow client subnet to destination port 5432
+DB-subnet NACL egress:  allow destination client subnet/port 51000 for this reply
+# Production rule ranges follow actual client ephemeral ranges and requirements.
+# Other subnet boundaries, routes, security groups, and host checks still apply.
+```
+
+Security groups aggregate their allow rules; adding a narrower group does not cancel a broader group's allow. A private subnet or NAT gateway is not permission to reach every service. Conversely, a private endpoint supplies a network path to a cloud service, not automatically authorization for all its resources. IAM, resource/endpoint policies, and the identity actually used by the SDK still matter. Diagnose network reachability separately from service authorization failures.
+
+!!! info "External Resources"
+    - [AWS Security Group State and Rules](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html) (AWS)
+    - [AWS Network ACL Ordering and Return Traffic](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-network-acls.html) (AWS)
+
+## Instance Metadata and Workload Identity
+
+AWS EC2's **Instance Metadata Service (IMDS)** is a local service that can supply instance metadata and, when configured, instance-role credentials. An SSRF flaw or compromised workload can be dangerous if it can reach a more privileged instance role. AWS security groups and NACLs do not filter IMDS traffic; use supported instance options and host/workload controls rather than assuming an Internet-egress deny protects it.
+
+**IMDSv2** requires a session token acquired with an HTTP PUT before metadata requests. Requiring it mitigates classes of SSRF that cannot perform the token exchange, but does not stop every arbitrary-request SSRF or a compromised process able to perform that exchange. The token is a metadata-session credential, not a narrowly scoped IAM permission for a particular application.
+
+The configured **PUT response hop limit** affects how far the token response can travel. A value of one can prevent response delivery through an extra routed container hop, but can also break a workload that depends on that path. Host-networked workloads do not necessarily introduce that hop. Choose and test the actual architecture; do not treat one hop-limit value as universal pod isolation. Account for the IPv6 IMDS endpoint too when enabled.
+
+**IAM roles for service accounts (IRSA)** lets a pod's supported SDK obtain AWS role credentials using its Kubernetes service-account identity rather than relying on the node role. For EKS, assign supported per-workload identities (such as IRSA or EKS Pod Identity) and least-privilege roles, minimize node-role privileges, and restrict unintended node-metadata access. Configuring a pod's intended identity does not by itself remove other reachable credential sources. SDK credential selection and hostNetwork/node privileges remain relevant. Never use live role credentials as a demonstration fixture.
+
+!!! info "External Resources"
+    - [IMDSv2 Behavior and Token Exchange](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html) (AWS)
+    - [Limit IMDS Access](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-metadata-limiting-access.html) (AWS)
+    - [EKS Workload Credential Isolation](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) (AWS)
+
+## Kubernetes NetworkPolicy Enforcement
+
+A Kubernetes **namespace** scopes API objects; it is not automatically a packet filter. A **NetworkPolicy** declares permitted pod traffic, but enforcement requires a network implementation that supports it. The Container Network Interface (CNI) plugin integrates pod networking; check the actual dataplane's policy capabilities. The API server accepting a policy does not prove that packets are being filtered.
+
+For the standard `networking.k8s.io/v1` API:
+
+- A policy's `podSelector` selects target pods in that policy's namespace. A direction becomes isolated when an applicable policy selects that pod for Ingress or Egress. Otherwise that direction is normally non-isolated under standard NetworkPolicy; other platform controls can still restrict it.
+- Applicable allow rules are additive. An empty default-deny policy establishes isolation; a later allow-all policy can permit traffic again. There is no ordered deny-overrides rule in this API.
+- For a pod-to-pod connection, the source's egress and destination's ingress must both permit it if those directions are isolated. Reply traffic for permitted connections is implicitly allowed.
+- One peer containing `namespaceSelector` and `podSelector` requires both to match. Two peer list items are alternatives: either can match. A lone `podSelector` peer selects pods in the policy's own namespace.
+- Standard policy targets pod/network L3/L4 relationships, not DNS domain allow-lists, HTTP paths, or verified service-account identity. Labels select objects; their safety depends on who may create/relabel those objects and alter policy.
+
+```yaml
+# Complete minimal object; assumes the network plugin enforces NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: isolate-both-directions
+  namespace: payments
+spec:
+  podSelector: {}  # All pods in payments; other namespaces need their own policy.
+  policyTypes: [Ingress, Egress]
+  ingress: []     # No allowed new ingress under this policy.
+  egress: []      # No allowed new egress under this policy.
+# Other policies selecting these pods can add permits; this is not an overriding deny.
+```
+
+Observe both allowed and denied new connections, cross-node and same-node paths, relevant IP families, and policy rollout. Existing-flow termination, Service/NAT ordering, and hostNetwork/node traffic handling depend on the implementation; do not infer them solely from a YAML object. Restrict privileged/hostNetwork workloads separately.
+
+!!! info "External Resources"
+    - [NetworkPolicy Selection, Additivity, and Implementation Limits](https://kubernetes.io/docs/concepts/services-networking/network-policies/) (Kubernetes)
+
+### DNS Under Egress Isolation
+
+An egress-isolated application often needs an explicit resolver path before it can locate permitted dependencies. Allow the actual resolver destination and required DNS transports; classic cluster DNS can use both UDP/53 and TCP/53. An allow for DNS does not authorize a later database/HTTPS connection, which needs its own permitted destination/port.
+
+CoreDNS may run behind a Service, while NodeLocal DNSCache can expose a node-local address. Inspect the pod's resolver configuration and the plugin's Service-translation/host-network behavior before choosing selectors or an `ipBlock`. Allowing CoreDNS pods by labels may not describe a NodeLocal path. Standard NetworkPolicy cannot express “allow HTTPS only to whatever name this DNS query returns.” Use supported additional egress/FQDN controls or a deliberately constrained proxy when that is the requirement. Resolver access also retains the [DNS exfiltration risks](dns.md#data-exfiltration-and-resolver-policy).
+
+!!! info "External Resources"
+    - [DNS for Services and Pods](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/) (Kubernetes)
+    - [NodeLocal DNSCache Paths](https://kubernetes.io/docs/tasks/administer-cluster/nodelocaldns/) (Kubernetes)
+
+## Mesh Identity and Traffic Entry Points
+
+In a service mesh, authenticated encryption establishes a protected connection and peer identity. It does not by itself decide which identity may call which application. For example, in a covered Istio sidecar deployment, **PeerAuthentication STRICT** requires accepted peer traffic to use mTLS, while an **AuthorizationPolicy** can restrict the authenticated workload principals, ports, and supported application operations. An unexpected workload can have a valid mesh certificate and still need to be denied. With no applicable ALLOW policy, STRICT alone adds no caller allow-list. When ALLOW policies apply, a request must match at least one applicable allow, subject to Istio's CUSTOM and DENY evaluation; an additional broad ALLOW can widen the permitted set. Explicitly verify workload enrollment, intercepted paths, policy attachment, and excluded ports; sidecar configuration is not a universal rule for ambient mode or every mesh.
+
+NetworkPolicy can constrain network reachability alongside mesh policy. The application still validates user/tenant/object authority where a service acts for a person. A trusted workload certificate is not evidence that every end user is entitled to a requested invoice.
+
+A Kubernetes **Service** supplies a stable forwarding abstraction; **NodePort** and **LoadBalancer** can expose additional entry paths. An **Ingress** or **Gateway API** resource expresses routing configuration that a compatible controller implements. Installing it does not automatically remove an existing public Service or node-port path. A WAF, login check, rate limit, or TLS policy at one gateway can be bypassed if traffic can reach the backend through another accepted path.
+
+```text
+Intended: client -> public gateway/WAF -> internal Service -> application
+Bypass:   client -> old LoadBalancer address ----------------> application
+# Deleting the old DNS name does not remove its still-reachable listener.
+```
+
+Inventory Services, gateway/controller listeners, cloud load balancers, routes, node exposure, and backend controls. Kubernetes/cloud-controller behavior, source-IP preservation, SNAT, and trusted forwarded headers affect which identity/address each enforcement point sees. `externalTrafficPolicy: Local` is not an authentication policy and does not make caller-supplied forwarding headers trusted. For example, the designated gateway strips/rebuilds forwarded identity/address headers from its validated connection context, and the backend accepts them only through its configured trusted proxy path. A direct caller must not be able to claim another source simply by supplying `X-Forwarded-For`; trusted-chain parsing must not treat a caller-controlled leftmost value as verified identity. Remove or restrict alternate paths under the intended contract and validate backend authorization independently.
+
+!!! info "External Resources"
+    - [Istio Peer Authentication](https://istio.io/latest/docs/reference/config/security/peer_authentication/) (Istio)
+    - [Istio Authorization Policy](https://istio.io/latest/docs/reference/config/security/authorization-policy/) (Istio)
+    - [Kubernetes Service Exposure](https://kubernetes.io/docs/concepts/services-networking/service/) (Kubernetes)
