@@ -31,6 +31,7 @@ nav:
   - Interview Prep:
     - interview-prep/index.md
     - Security Questions: interview-prep/questions.md
+    - Staff / Principal Cloud Scenarios: interview-prep/staff-principal.md
   - Networking & Protocols:
     - networking/index.md
     - DNS: networking/dns.md
@@ -50,6 +51,7 @@ nav:
     - Cloud Security: infrastructure-cloud/cloud-security.md
     - Container Security: infrastructure-cloud/containers.md
     - Cloud IAM: infrastructure-cloud/iam.md
+    - Multi-Account Architecture: infrastructure-cloud/multi-account-security.md
     - Secrets Management: infrastructure-cloud/secrets-management.md
   - Linux OS:
     - linux/index.md
