@@ -4,7 +4,7 @@
 
 ### Basics and Core Concepts
 
-The Linux network stack security primarily relies on the **Netfilter** framework, which facilitates packet filtering, network address translation (NAT), and port translation. Administrators typically interact with Netfilter via userspace tools like `iptables` or the modern successor `nftables`. Effective firewall configuration requires a "default deny" policy (dropping all traffic by default) and explicitly allowing only necessary traffic through specific chains (INPUT, OUTPUT, FORWARD). Understanding the packet flow is critical; for instance, the `PREROUTING` chain handles packets before routing decisions, while `POSTROUTING` handles them after.
+The Linux network stack security primarily relies on the **Netfilter** framework, which facilitates packet filtering, network address translation (NAT), and port translation. Administrators typically interact with Netfilter via userspace tools like `iptables` or the modern successor `nftables`. Define initiation and return-path policy for the host's role; default deny at relevant boundaries requires explicit required-flow and recovery planning. INPUT, OUTPUT, and FORWARD cover different traffic paths, so do not apply a blanket policy without understanding router/container/node requirements. Understanding the packet flow is critical; for instance, the `PREROUTING` chain handles packets before routing decisions, while `POSTROUTING` handles them after.
 
 
 
@@ -21,9 +21,9 @@ Network isolation is achieved via **Network Namespaces**, a fundamental building
 | **Firewall** | Default Deny | `iptables -P INPUT DROP` | Prevents unauthorized access by default. |
 | **Netfilter** | Connection Tracking | `-m state --state ESTABLISHED,RELATED` | Allows return traffic without opening all ports. |
 | **Namespaces** | Isolation | `ip netns add <name>` | Segregates network stacks to contain breaches. |
-| **Binding** | Interface Restriction | `bind-address = 127.0.0.1` | Prevents public exposure of internal services. |
+| **Binding** | Interface Restriction | `bind-address = 127.0.0.1` | Limits the listener; proxies/tunnels/port publication can still expose a path. |
 | **Logging** | Kernel Logging | `iptables -A INPUT -m limit --limit 5/second -j LOG --log-prefix "INPUT: "` | Example observation rule, not a drop action; placement and a separate verdict matter. |
-| **Sysctl** | IP Forwarding | `net.ipv4.ip_forward = 0` | Prevents the host from acting as a router. |
+| **Sysctl** | IP Forwarding | `net.ipv4.ip_forward = 0` | Disables applicable IPv4 forwarding; IPv6 and container/router roles require separate policy. |
 
 !!! info "External Resources for Deep Dive"
     * **[Arch Linux Wiki: Iptables](https://wiki.archlinux.org/title/Iptables)** - A comprehensive technical reference for configuring the Netfilter framework.
@@ -40,7 +40,7 @@ Network isolation is achieved via **Network Namespaces**, a fundamental building
 
 **Daemon Security** focuses on privilege management. Prefer dedicated service identities and the minimum privileges required by the daemon. Some services need privileged startup or narrowly scoped capabilities; constrain and drop those privileges where supported. If a service requires binding to a privileged port (< 1024), capabilities such as `CAP_NET_BIND_SERVICE` should be granted specifically to the binary or systemd unit, rather than running the entire process as root. This reduces privileges available after remote code execution; capabilities, accessible credentials, and local escalation paths still determine impact.
 
-**Network Service Isolation** restricts the file system and system call access of a running process. Techniques include `chroot` jails (changing the root directory for the process) and modern `systemd` sandboxing directives (e.g., `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`). Their effect depends on the exact directives, writable exceptions, privileges, and kernel support. A chroot alone is not a security boundary against a privileged process; use layered access controls and validate the service's actual restrictions.
+**Network Service Isolation** can restrict filesystem views and other process resources. The filesystem directives below do not themselves define a syscall allow-list; seccomp/SystemCallFilter-style controls require separate configuration. Techniques include `chroot` jails (changing the root directory for the process) and modern `systemd` sandboxing directives (e.g., `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`). Their effect depends on the exact directives, writable exceptions, privileges, and kernel support. A chroot alone is not a security boundary against a privileged process; use layered access controls and validate the service's actual restrictions.
 
 **SSL/TLS Configuration** ensures the confidentiality and integrity of data in transit. Hardening involves disabling obsolete protocols (SSLv2, SSLv3, TLS 1.0, TLS 1.1) and weak cipher suites (e.g., RC4, null ciphers). Prefer ephemeral key establishment for **forward secrecy**, and review resumption/early-data modes separately and evaluate **HTTP Strict Transport Security (HSTS)** for browser HTTPS deployment. HSTS is not applicable to every TLS protocol and needs staged scope/lifetime planning; see [TLS](../networking/tls.md).
 
@@ -52,9 +52,9 @@ Network isolation is achieved via **Network Namespaces**, a fundamental building
 | :--- | :--- | :--- | :--- |
 | **Privileges** | Non-Root Execution | `User=www-data` (Systemd) | Limits impact of RCE to low-privilege user. |
 | **Capabilities** | Granular Perms | `setcap 'cap_net_bind_service=+ep' /path/to/daemon` | Binds privileged ports without root. |
-| **Sandboxing** | FS Isolation | `ProtectSystem=strict` | Makes the OS filesystem read-only for the service. |
+| **Sandboxing** | FS Isolation | `ProtectSystem=strict` | Makes the service's filesystem view largely read-only; managed writable exceptions and other mounts still matter. |
 | **Encryption** | Protocol Version | `ssl_protocols TLSv1.2 TLSv1.3;` (Nginx) | Mitigates BEAST, POODLE, and other protocol exploits. |
-| **Headers** | HSTS | `Strict-Transport-Security` | Forces clients to connect over HTTPS only. |
+| **Headers** | HSTS | `Strict-Transport-Security` | Applies learned/preloaded HTTPS policy in supporting user agents. |
 | **Obfuscation** | Info Disclosure | `server_tokens off` | Hides software version to complicate recon. |
 
 !!! info "External Resources for Deep Dive"

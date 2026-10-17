@@ -1,87 +1,58 @@
-# Critical System Directories and Security Implications
+# Critical System Directories
 
-## Basics and Core Concepts
+A path's security depends on the process's mount view, every traversed parent, the opened object, and policy. Directory names describe conventions, not automatic trust. Distribution layout and container/immutable-host design vary.
 
-**Configuration and Authentication Targets (`/etc`)**
-The `/etc` directory houses host-specific system-wide configuration files and is the primary target for attackers seeking persistence or privilege escalation. Critical files include `/etc/passwd` (user attributes), `/etc/shadow` (hashed passwords), `/etc/sudoers` (privilege delegation), and `/etc/ssh/sshd_config` (remote access policies). A compromise of write permissions in this directory allows adversaries to create rogue users, modify service configurations, or alter path variables. Furthermore, strict permission settings (typically 0600 or 0640 owned by root) on `/etc/shadow` and `/etc/sudoers` are mandatory to prevent unauthorized reads leading to offline password cracking or unauthorized writes leading to immediate root access.
+## Configuration, Executables, and Runtime State
 
-**Binaries and SUID Risks (`/bin`, `/sbin`, `/usr`)**
-System executables reside in `/bin` (essential user binaries) and `/sbin` (essential system binaries), with non-essential counterparts in `/usr/bin` and `/usr/sbin`. From a security perspective, the integrity of these directories is paramount; unauthorized modification constitutes a "Trojan" attack, replacing legitimate tools (like `ls` or `ps`) to hide malicious activity. Engineers must monitor these directories for the presence of SUID (Set User ID) and SGID (Set Group ID) binaries. Improperly coded SUID binaries found here are frequent vectors for local privilege escalation, as they execute with the file owner's permissions (usually root) rather than the user's.
+| Path | Typical contents | Security question |
+|---|---|---|
+| `/etc` | Local configuration, account and service policy | Who can modify the file or replace it through its parent? |
+| `/usr`, `/bin`, `/sbin` | Installed programs/libraries | Is this a merged-/usr layout, and are binaries/configuration trusted? |
+| `/var/lib` | Persistent application state | Which service may read/write it, and what is backed up? |
+| `/var/log` | Retained logs | Are capacity, access, forwarding, and rotation controlled? |
+| `/run` | Volatile runtime data and sockets | Does a socket delegate privileged daemon authority? |
+| `/proc`, `/sys` | Kernel/process interfaces, not ordinary disk data | Which namespace, visibility, capabilities, and write controls apply? |
+| `/tmp`, `/var/tmp` | Temporary files under lifecycle conventions | Are creation, ownership, cleanup, and mount policies safe? |
+| `/boot` | Boot artifacts | What validates boot integrity, and how are authorized updates performed? |
 
-**Variable Data, Logging, and Web Roots (`/var`)**
-The `/var` directory contains variable data files, including logs (`/var/log`), mail, printer spools, and often web server content (`/var/www`). Security engineering focuses heavily on `/var/log` for incident response; if an attacker gains write access here, they can sanitize logs to remove evidence of intrusion (`timestomping` or deletion). Additionally, `/var` should ideally be mounted on a separate partition to prevent a Denial of Service (DoS) attack where a flooded log directory consumes all available disk space, causing critical system services to crash.
+On a merged-/usr installation, `/bin` or `/sbin` can be symlinks into `/usr`. Inspect the resolved path rather than assuming separate protected partitions. Typical sensitive-file modes differ: `/etc/passwd` is generally readable; `/etc/shadow` is restricted; sudoers is commonly `0440` with owner/mode checks. Use distribution-supported settings instead of one blanket mode for `/etc`.
 
-**Runtime Information and Temporary Storage (`/proc`, `/sys`, `/tmp`)**
-`/tmp` provides temporary storage and must be world-writable, making it a hotspot for race condition attacks and insecure file creation. It requires the "sticky bit" (chmod +t) to ensure users can only delete files they own, and should be mounted with `noexec` and `nosuid` to prevent malware execution. Meanwhile, `/proc` and `/sys` are pseudo-filesystems interacting directly with the kernel; they expose sensitive process information, kernel memory pointers, and hardware configuration. While generally strictly controlled, information leaks in `/proc` (such as ASLR offsets) can facilitate buffer overflow exploits.
+```bash
+# Read-only Linux templates for permitted files.
+namei -l /usr/local/sbin/report-helper
+stat -c '%A %u:%g %n' /usr/local/sbin/report-helper
+findmnt -T /usr/local/sbin/report-helper
+# Also inspect any script, config, plugin, or working directory used by this helper.
+```
 
----
+!!! info "External Resources"
+    - [Filesystem Hierarchy Standard 3.0](https://refspecs.linuxfoundation.org/FHS_3.0/fhs-3.0.html) (Linux Foundation; layout conventions)
+    - [Path Resolution](https://man7.org/linux/man-pages/man7/path_resolution.7.html) (Linux man-pages)
 
-## Practical Examples
+## Temporary Files and Path Races
 
-**1. Securing Temporary Storage**
-To mitigate risks associated with execution of malicious scripts dropped in `/tmp` or `/var/tmp`, these directories should be mounted on separate partitions with restrictive flags.
-* **Configuration:** Edit `/etc/fstab`:
-    ```bash
-    # Example /etc/fstab entry
-    /dev/vg0/tmp  /tmp  ext4  defaults,noexec,nosuid,nodev  0 0
-    ```
-    * `noexec`: Prevents binary execution.
-    * `nosuid`: Ignores SUID bits.
-    * `nodev`: Prevents character or block special devices from being interpreted.
+**Time of check to time of use (TOCTOU)** occurs when a program checks a name, an attacker changes what that name resolves to, and the program later uses the new object under old assumptions. Avoid predictable shared-directory files and independent check-then-open sequences; use supported atomic creation/opening APIs and trusted directory descriptors where required.
 
-**2. Auditing SUID Binaries**
-Security engineers must regularly audit the filesystem for unauthorized SUID binaries that could lead to privilege escalation.
-* **Command:**
-    ```bash
-    # Find all files with SUID bit set, owned by root
-    find / -user root -perm -4000 -print 2>/dev/null
-    ```
-* **Implication:** If an unknown binary appears in this list, or if a standard utility (like `vim` or `cp`) appears here unexpectedly, it indicates a severe misconfiguration or a backdoor.
+```python
+# Runnable local fixture: exclusive temporary creation in a private directory.
+from pathlib import Path
+from tempfile import TemporaryDirectory
+with TemporaryDirectory(prefix="study-private-") as directory:
+    path = Path(directory) / "result.txt"
+    with path.open("x") as output:  # Exclusive creation: fail if name already exists.
+        output.write("harmless study data\n")
+    print(path.read_text().strip())
+# Private directory protects the parent path; 'x' alone is not every path defense.
+```
 
-**3. Immutable Files**
-For critical configuration files that should rarely change, the immutable attribute adds a layer of protection beyond standard DAC (Discretionary Access Control). Even the root user cannot delete or modify the file until the attribute is removed.
-* **Command:**
-    ```bash
-    # Set immutable flag on /etc/shadow
-    chattr +i /etc/shadow
+Sticky mode limits eligible removals/renames; it does not stop reads of permissive files. `noexec` is not a complete interpreter-execution barrier. See [file and directory permissions](file-system.md).
 
-    # Verify attributes
-    lsattr /etc/shadow
-    # Output: ----i---------e---- /etc/shadow
-    ```
+!!! info "External Resources"
+    - [Atomic Exclusive Creation and Path Flags](https://man7.org/linux/man-pages/man2/open.2.html) (Linux man-pages)
+    - [Python Secure Temporary Files](https://docs.python.org/3/library/tempfile.html) (Python)
 
----
+## Privileged Consumers and Boot Integrity
 
-## Quick Reference Cheatsheet
+A root-run service/timer reading an unprivileged-writable script can execute attacker-controlled content without changing the root-owned service binary. Follow the full dependency chain, including drop-ins, environment/config files, executable search path, and runtime sockets. A socket under `/run` can be more powerful than a writable regular file if it accepts administrative requests.
 
-| Directory | Primary Purpose | Critical Security Risks | Hardening / Mitigation |
-| :--- | :--- | :--- | :--- |
-| **`/etc`** | System configuration & Auth | Privilege escalation (modifying `sudoers`), Credential theft (`shadow`). | File integrity monitoring (FIM), strict permissions (0600/0640), `chattr +i`. |
-| **`/bin`, `/sbin`** | Essential Binaries | Trojaned binaries, Vulnerable SUID executables. | FIM, audit SUID binaries regularly, mount read-only if possible. |
-| **`/var/log`** | System Logs | Log tampering (covering tracks), Disk exhaustion DoS. | Remote logging (syslog-ng/rsyslog), separate partition. |
-| **`/tmp`** | Temporary Files | TOCTOU (Time-of-check to Time-of-use) race conditions, malware execution. | Sticky bit (`+t`), mount with `noexec`, `nodev`, `nosuid`. |
-| **`/boot`** | Boot loader files | Kernel tampering, insecure boot parameters. | Secure Boot, restrictive permissions, encrypt `/boot` if needed. |
-| **`/dev`** | Device files | Direct hardware access, unmanaged block devices. | Restrict access to `/dev/mem` and `/dev/kmem`, mount with `noexec`. |
-
-
-
----
-
-## External Resources for Deep Dive
-
-!!! info "Recommended Study Materials"
-    * **Filesystem Hierarchy Standard (FHS) Specification**
-        * [Official FHS Documentation (refspecs.linuxfoundation.org)](https://refspecs.linuxfoundation.org/FHS_3.0/fhs-3.0.html)
-        * *Context:* The authoritative source on directory layout and requirements. Essential for understanding standard compliance.
-
-    * **CIS Benchmark for Linux (Center for Internet Security)**
-        * [CIS Benchmarks (cisecurity.org)](https://www.cisecurity.org/cis-benchmarks/)
-        * *Context:* Industry-standard hardening guidelines. Sections regarding "Filesystem Configuration" detail specific mount options (`nodev`, `nosuid`) for critical directories.
-
-    * **Red Hat Enterprise Linux Security Guide**
-        * [RHEL Security Hardening - File System Security](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/security_hardening/scanning-the-system-for-security-compliance-and-vulnerabilities_security-hardening)
-        * *Context:* Practical, enterprise-grade documentation on securing filesystems, setting ACLs, and managing permissions.
-
-***
-
-Would you like to review this material in more detail, or are you ready to proceed to the next security engineering topic?
+Immutable attributes do not defeat a caller with the authority to clear them and can break account/update maintenance. Secure Boot checks the applicable boot trust chain; encrypting storage addresses a different confidentiality threat. Restrict boot configuration, signing authority, recovery access, and update paths according to the actual deployment.

@@ -1,29 +1,33 @@
 # Linux OS Security
 
-This section covers the security principles and hardening techniques for the Linux operating system. Linux is the foundation of most cloud infrastructure, containers, and high-security environments. Understanding its internal security model is critical for any security engineer.
+Linux security depends on the authority of a running process, the objects it can reach, and the kernel/service decisions that enforce access. A username, container label, compliance score, or encrypted disk is evidence about one part of that system, not a complete security boundary.
 
-## Core Topics
+## Learning Path and Prerequisites
 
-- **[File System Security](file-system.md)** - Permissions (DAC), special bits (SUID/SGID), and secure mounting.
-- **[Kernel & Userspace](kernel-userspace.md)** - Memory protection, system calls, and the boundary between kernel and user mode.
-- **[Access Control Systems](access-control-systems.md)** - Deep dive into ACLs, and Mandatory Access Control (SELinux, AppArmor).
-- **[User Management](user-management.md)** - UID/GID, sudo configuration, and the principle of least privilege.
-- **[Process Security](process-security.md)** - Process isolation, signals, and monitoring running services.
-- **[Hardening & Compliance](hardening-compliance.md)** - CIS Benchmarks, automated auditing, and system-wide security policies.
-- **[VM & Container Security](vm-container-sec.md)** - Namespaces, cgroups, hypervisors, and isolation technology.
-- **[Network Security](network-security.md)** - Linux network stack hardening, sysctl tuning, and secure protocols.
-- **[Firewalls](firewalls.md)** - Netfilter, iptables, nftables, and frontend tools like UFW/Firewalld.
-- **[Logging & Monitoring](logging-monitoring.md)** - Syslog, journald, auditd, and centralized log analysis.
+Start with basic shell syntax, processes, files/directories, and numeric identities. Work through the sequence below, then use the [14 tricky interview questions](interview-questions.md). Half of the questions apply the mechanisms to cloud/container hosts.
 
-## Key Learning Objectives
+| Stage | Topics | What to explain afterward |
+|---|---|---|
+| File decisions | [File systems](file-system.md), [access controls](access-control-systems.md), [system paths](system-paths.md) | Why one operation succeeds and another fails on the same path |
+| Authority | [Kernel/userspace](kernel-userspace.md), [users/groups](user-management.md), [process security](process-security.md) | Which credentials, capabilities, and enforcement layers a process actually has |
+| Login and data | [Authentication](authentication.md), [encryption](encryption.md) | What a credential/key protects and which existing access it does not revoke |
+| Operations | [Packages](package-management.md), [hardening](hardening-compliance.md), [logging](logging-monitoring.md) | How a change becomes active and what evidence supports the result |
+| Network paths | [Firewalls](firewalls.md), [network security](network-security.md) | How listener, route, state, and namespace affect exposure |
+| Workload isolation | [VM/container security](vm-container-sec.md), [attack vectors](attack-vectors.md) | Which host interfaces remain reachable and under whose authority |
+| Reference and practice | [CLI tools](cli-tools.md), [interview questions](interview-questions.md) | Which observation or rejection test distinguishes competing explanations |
 
-1.  **Understand the Linux Security Model**: Master the concepts of DAC vs. MAC and how the kernel enforces boundaries.
-2.  **Privilege Management**: Learn how to effectively use `sudo`, capabilities, and user namespaces to minimize risk.
-3.  **System Hardening**: Apply industry-standard benchmarks (CIS, STIG) to secure a Linux distribution from the ground up.
-4.  **Isolation Technologies**: Deep dive into how containers and VMs work at the kernel level to provide security boundaries.
-5.  **Auditing and Visibility**: Configure comprehensive logging and auditing to detect and investigate security incidents.
-6.  **Secure Communication**: Harden the network stack and manage firewall rules to protect services from external threats.
+## Trace One Service Operation
 
----
+```text
+Request reaches service -> process handles request under current credentials
+ -> resolves data path in its mount namespace
+ -> applicable DAC/ACL/capability/LSM checks permit or deny access
+ -> existing descriptor, resource limits, and runtime state affect later operations
+ -> application authorizes the requested user's action separately
+ -> configured logs/collector may retain evidence, subject to coverage/loss controls
+# Non-root execution does not replace every subsequent check.
+```
 
-*For interview preparation related to Linux security, see the [Security Questions](../interview-prep/questions.md) section.*
+A Kubernetes pod can use that same host kernel while receiving different mount/PID/user views, capabilities, seccomp filters, and volume access. Changing the image or account database does not automatically rewrite every active kernel, credential, connection, or key in the system. The lessons emphasize these lifecycles and their observable limits.
+
+Use [networking](../networking/index.md) for packet paths and [authentication architecture](../authentication/index.md) for application/session protocols. Keep Linux file/process authority separate from cloud IAM and Kubernetes API authorization when combining those models.

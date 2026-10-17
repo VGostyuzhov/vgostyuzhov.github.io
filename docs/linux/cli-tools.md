@@ -2,7 +2,6 @@
 
 Essential command-line tools for security analysis, monitoring, and incident response on Linux systems.
 
-## Table of Contents
 
 ## System Information & Monitoring
 
@@ -87,7 +86,7 @@ john     pts/0        192.168.1.100    Mon Dec 11 09:30   still logged in
     │        └── System uptime
     └── Current time
 ```
-- **Load average**: CPU usage (>1.0 means overloaded on single-core systems)
+- **Load average**: Linux averages runnable and uninterruptible tasks; it is not a CPU-utilization percentage. Interpret with CPU count, I/O state, and cgroup limits.
 
 ### Process Monitoring
 
@@ -102,7 +101,7 @@ pstree -p                  # Include PIDs
 # Find specific processes
 pidof process_name         # Get PID by name
 pgrep -f pattern          # Find PIDs by pattern
-pkill -f pattern          # Kill processes by pattern
+pkill -f pattern          # MUTATION: signals all matching processes; not an inspection command
 ```
 
 **Reading ps aux output:**
@@ -199,7 +198,7 @@ Swap:         2.0Gi          0B       2.0Gi
 - **total**: Total installed memory
 - **used**: Memory currently in use
 - **free**: Completely unused memory
-- **shared**: Memory shared between processes
+- **shared**: Primarily memory used by tmpfs/shmem under Linux reporting, not a sum of every shared process mapping
 - **buff/cache**: Buffers + cached data (can be freed if needed)
 - **available**: Memory available for new processes
 
@@ -284,9 +283,9 @@ dmesg | tail             # Recent kernel messages
 **Suspicious Process Detection**
 ```bash
 # Find processes running as different users
-ps -eo pid,ppid,user,cmd | grep -v "^$USER"
+ps -eo pid,ppid,user,comm  # Inspect the USER column; rows start with PID, not user
 
-# Processes without controlling terminal
+# Processes without a controlling terminal (normal for many daemons)
 ps -eo pid,ppid,tty,cmd | grep "?"
 
 # Network connections by process
@@ -302,7 +301,7 @@ ps -eo pid,ppid,cmd,%cpu --sort=-%cpu | head -10
 # Top memory consumers
 ps -eo pid,ppid,cmd,%mem --sort=-%mem | head -10
 
-# Processes with many open files
+# lsof rows include mappings/other entries: this counts rows, not exact open FDs
 lsof | awk '{print $2}' | sort | uniq -c | sort -rn | head -10
 ```
 
@@ -319,7 +318,7 @@ lsof | awk '{print $2}' | sort | uniq -c | sort -rn | head -10
 
 !!! tip "Security Monitoring Tips"
     - Monitor for processes running as unexpected users
-    - Check for processes without controlling terminals (potential backdoors)
+    - Correlate unexpected process lineage/identity/behavior; no terminal alone is normal for services
     - Watch for unusual network connections and high resource usage
     - Use `watch` command to continuously monitor: `watch -n 1 'ps aux --sort=-%cpu | head -10'`
 
@@ -357,9 +356,9 @@ lsof | awk '{print $2}' | sort | uniq -c | sort -rn | head -10
 - **Process Isolation**
   - `chroot`, `unshare`, `nsenter`
   - `systemd-nspawn`, `firejail`
-- **Cryptography**
-  - `openssl`, `gpg`, `ssh-keygen`
-  - `base64`, `uuencode`, `uudecode`
+- **Cryptography and Encoding**
+  - `openssl`, `gpg`, `ssh-keygen`: protocol/key/cryptography tools
+  - `base64`, `uuencode`, `uudecode`: encoding only, not confidentiality or integrity
 
 ### Logging & Auditing
 - **System Logs**
@@ -414,7 +413,7 @@ lsof | awk '{print $2}' | sort | uniq -c | sort -rn | head -10
   - Package signing and verification methods
 - **Software Installation**
   - `snap`, `flatpak`, `appimage`
-  - Containerized applications
+  - Packaging/isolation varies: AppImage alone does not imply a sandbox
 
 ### Performance & Debugging
 - **Performance Profiling**
@@ -422,7 +421,7 @@ lsof | awk '{print $2}' | sort | uniq -c | sort -rn | head -10
   - `cpulimit`, `ulimit`, `prlimit`
 - **Debugging Tools**
   - `valgrind`, `gprof`, `objdump`
-  - `readelf`, `nm`, `ldd`
+  - `readelf`, `nm`; avoid `ldd` on untrusted executables because some implementations/inputs can execute code
 
 ### Automation & Scripting
 - **Shell Scripting Security**
@@ -437,3 +436,22 @@ lsof | awk '{print $2}' | sort | uniq -c | sort -rn | head -10
     - [Linux Command Line Basics](https://linuxcommand.org/)
     - [SANS Linux CLI Cheat Sheet](https://www.sans.org/posters/linux-shell-survival-guide/)
     - [ExplainShell](https://explainshell.com/) for command breakdowns
+## Interpret Evidence Under the Actual Boundary
+
+The host and a container can see different PIDs, mounts, users, cgroups, and network sockets. A denied `/proc` read can mean missing privilege or policy; it is not proof that no process exists. A command can also report partial results or race a process exiting. Record the observer and namespace before comparing outputs.
+
+```bash
+# Read-only Linux workflow: use actual authorized identifiers, not broad kill patterns.
+target_pid=1234
+ps -p "$target_pid" -o pid,ppid,user,group,comm
+sed -n '/^Uid:/p; /^Gid:/p; /^Cap/p; /^NoNewPrivs:/p; /^Seccomp/p' /proc/$target_pid/status
+cat /proc/$target_pid/cgroup
+# Do not dump environ, memory, or core files into shared diagnostics: they can hold secrets.
+```
+
+Use `strace`, eBPF, or debugger attachment only under an appropriate investigation plan: instrumentation can perturb timing, expose secrets, or miss paths outside its filters. Prefer an isolated representative fixture for learning. A high load, a listening port, or one permission error needs context before remediation.
+
+!!! info "External Resources"
+    - [Linux Load-Average Interpretation](https://man7.org/linux/man-pages/man1/uptime.1.html) (procps)
+    - [ldd Untrusted-Program Warning](https://man7.org/linux/man-pages/man1/ldd.1.html) (Linux man-pages)
+    - [Process Status and Visibility](https://man7.org/linux/man-pages/man5/proc_pid_status.5.html) (Linux man-pages)

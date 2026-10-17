@@ -1,31 +1,49 @@
-# User and Group Management: A Study Guide
+# User and Group Management
 
-This guide focuses on the principles of user and group management in Linux, a cornerstone of system security. Proper configuration ensures that access is granted according to the principle of least privilege, providing accountability and preventing unauthorized actions.
+Linux access is attached to numeric identities, process credentials, and policy, not only account names. NSS (Name Service Switch) resolves identities through configured local/directory sources; the same name can resolve differently across hosts or namespaces.
 
-## Basics and Core Concepts
+## Accounts and Running Credentials
 
-Linux is an inherently multi-user operating system where every user is assigned a unique **User ID (UID)** and belongs to one or more groups, each with a **Group ID (GID)**. The system distinguishes between the all-powerful `root` user (UID 0), system accounts used for running services (typically low UIDs), and regular human user accounts (typically UIDs 1000 and above). This user and group information is primarily stored in the `/etc/passwd` and `/etc/group` files, respectively. Crucially, encrypted password hashes are stored separately in the `/etc/shadow` file, which is readable only by the `root` user, protecting them from offline cracking attempts.
+`/etc/passwd` stores local account attributes, not local password hashes. `/etc/shadow` holds password-verifier/account-aging data with restricted access (often root and a designated group, depending on the distribution). It does not store reversibly encrypted passwords. UID ranges and account allocation conventions are distribution/configuration dependent.
 
-Privilege escalation is managed almost exclusively through the **`sudo`** utility. Instead of sharing the `root` password, which is a major security risk, administrators grant specific users or groups the ability to run some or all commands as `root`. These permissions are defined in the `/etc/sudoers` file (which must always be edited with `visudo` to prevent syntax errors). This approach provides both granular control and a clear audit trail, as every command executed via `sudo` is logged.
+```bash
+# Read-only identity lookup; getent follows configured NSS, not only local files.
+getent passwd appsvc
+id appsvc
+# Inspect an authorized process's actual credentials, which may be older.
+target_pid=1234
+sed -n '/^Uid:/p; /^Gid:/p; /^Groups:/p' /proc/$target_pid/status
+```
 
-A key security distinction is made between interactive user accounts and **service accounts**. User accounts are for humans and have a login shell. Service accounts are for running applications and daemons. To adhere to the principle of least privilege, service accounts should be created with no login shell (e.g., `/sbin/nologin`), have their password locked, and possess only the minimal permissions required for the service to function. This prevents them from being used as a foothold for an interactive session if compromised.
+Changing group membership in the directory/local database does not rewrite existing processes' supplementary group lists. New login/service sessions may receive new credentials while old workers continue using their previous ones. Offboarding needs an explicit boundary for new login, current sessions, running jobs, SSH keys, API credentials, and external workload roles.
 
-To defend against brute-force attacks, robust password policies are essential. This is managed through **Pluggable Authentication Modules (PAM)**. PAM allows for the configuration of password complexity rules (e.g., length, character types via `pam_pwquality`) and account lockout policies (e.g., locking an account after multiple failed login attempts via `pam_faillock`). Enforcing strong password hygiene and automated lockout mechanisms is a fundamental step in securing user access.
+!!! info "External Resources"
+    - [Process Credentials](https://man7.org/linux/man-pages/man7/credentials.7.html) (Linux man-pages)
+    - [Shadow Password Data](https://man7.org/linux/man-pages/man5/shadow.5.html) (shadow-utils)
 
-### User Management Cheat Sheet
+## Service Accounts and Delegation
 
-| Task | Command / File | Description | Security Goal |
-| :--- | :--- | :--- | :--- |
-| **Create User** | `useradd` | Creates a new user account. | Provisioning Access |
-| **Modify User** | `usermod` | Modifies user attributes (e.g., add to a group). | Adjusting Privileges |
-| **Delete User** | `userdel -r` | Removes a user and their home directory. | Deprovisioning Access |
-| **Manage Passwords** | `passwd`, `chage` | Set passwords and configure password aging policies. | Password Hygiene |
-| **Grant Privileges** | `/etc/sudoers` (edit with `visudo`) | Defines which users/groups can run commands as root. | Least Privilege |
-| **View Users** | `/etc/passwd` | Contains user account information (UID, GID, shell). | Auditing |
-| **View Passwords** | `/etc/shadow` | Contains encrypted password hashes. Readable only by root. | Credential Protection |
-| **Lockout Policy** | PAM (`pam_faillock`) | Configure account lockout after failed login attempts. | Brute-Force Mitigation |
+A dedicated service identity separates one daemon's data/permissions from another's. Locking its password and selecting `nologin` constrain particular login paths; they do not prevent the daemon from executing code after exploitation, nor necessarily block every SSH/PAM/key-based path. A service process can operate without an interactive login shell.
 
-!!! info "External Resources for Deep Dive"
-    *   **`sudoers` Manual:** [https://www.sudo.ws/docs/man/sudoers.man/](https://www.sudo.ws/docs/man/sudoers.man/) (The official, detailed manual for the `sudoers` file syntax).
-    *   **Pluggable Authentication Modules (PAM) Administrator's Guide:** [https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/security_hardening/using-pam_security-hardening](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/security_hardening/using-pam_security-hardening) (A guide to understanding and configuring PAM).
-    *   **Arch Wiki - Security/Account security:** [https://wiki.archlinux.org/title/Security#Account_security](https://wiki.archlinux.org/title/Security#Account_security) (A concise community-maintained checklist for user account security).
+**sudo** delegates specified command execution under another identity. Its safety depends on the executable, arguments, environment, writable configuration/plugins, shell escapes, and files it can modify. Allowing a general interpreter/editor as root is often much broader than the command name suggests. Edit policy with `visudo` and validate the effective result; sudo logs do not automatically record every action inside a launched root shell.
+
+```bash
+# Authorized Linux host: inspect rather than modify delegation.
+sudo -l
+# Validate the installed sudoers configuration without changing it.
+sudo visudo -c
+# Review indirect inputs too: a root-run helper reading a user-writable script
+# can delegate root authority even if its own executable is not writable.
+```
+
+Use narrow, maintained administrative interfaces with controlled inputs and auditable actions; do not invent an unsafe wrapper as a substitute for reviewing the operation. Removing sudo permission does not kill a root shell already started through it.
+
+!!! info "External Resources"
+    - [sudoers Command, Environment, and Logging Rules](https://www.sudo.ws/docs/man/sudoers.man/) (sudo)
+    - [nologin Scope](https://man7.org/linux/man-pages/man8/nologin.8.html) (util-linux)
+
+## Provisioning and Removal
+
+Use platform-managed account provisioning, unique identities, controlled group assignment, and recorded ownership. Before account deletion or UID reuse, identify retained files, services, jobs, and credentials; a new account receiving an old numeric UID can acquire access to old UID-owned data. `userdel -r` is a destructive removal operation, not an investigation command.
+
+Choose authentication throttling, recovery, and MFA for the actual service. Account lockout can also enable denial of service; do not impose one universal failure count. See [Linux authentication](authentication.md) for PAM and SSH enforcement.

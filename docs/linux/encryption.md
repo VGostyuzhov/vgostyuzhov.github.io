@@ -1,27 +1,41 @@
-# Linux Encryption: A Study Guide
+# Linux Encryption at Rest
 
-This guide covers fundamental concepts and tools for data encryption at rest on Linux systems. A strong grasp of these technologies is essential for protecting sensitive data from unauthorized access in the event of physical theft or storage media compromise.
+Encryption protects selected data under a key-management and access model. Distinguish a stolen offline disk from a running host whose volume is already unlocked. An authorized or compromised process that can read plaintext is not stopped by the underlying block encryption.
 
-## Basics and Core Concepts
+## Block and File Encryption
 
-Data encryption on Linux can be broadly categorized into two types: **full-disk encryption (FDE)** and **file-based encryption**. FDE operates at the block device level, encrypting an entire partition or disk, making it the most comprehensive solution for protecting system and user data. In contrast, file-based methods provide more granular control, encrypting individual files or directories, which can be useful for isolating specific data sets without encrypting the entire OS.
+| Mechanism | Boundary | Important limitation |
+|---|---|---|
+| dm-crypt + LUKS | Block-device mapping and keyslot metadata | Open mapping exposes decrypted blocks/files to authorized running processes |
+| fscrypt | Filesystem-supported encrypted directory policies | Key availability, metadata coverage, and access checks differ from block encryption |
+| GnuPG | Explicit encrypted file/message | Decrypted copies, recipient keys, and running-process exposure remain relevant |
 
-The standard for FDE in the Linux world is the **`dm-crypt`** kernel subsystem used in conjunction with **LUKS (Linux Unified Key Setup)**. `dm-crypt` handles the transparent, on-the-fly encryption and decryption of data as it's read from or written to the disk. LUKS provides the critical metadata management, storing the master encryption key (itself encrypted by a user's passphrase) and other configuration details directly on the disk. This architecture ensures that without the correct passphrase, the entire underlying block device is unreadable.
+LUKS keyslots protect access to a volume key using supported credentials and key-derivation function (KDF) parameters. A passphrase change normally changes how that key is unlocked, not every encrypted data block. The header contains critical metadata; losing it can make data unrecoverable even with a remembered passphrase. Backups must protect both availability and confidentiality.
 
-For more granular, file-level encryption, **`fscrypt`** and **`GnuPG` (GPG)** are the leading solutions. `fscrypt` is a modern kernel feature integrated directly into filesystems like `ext4` and `F2FS`. It offers high-performance, transparent encryption for designated directories and is the preferred method for home directory encryption on many modern distributions. `GnuPG`, on the other hand, is a user-space tool based on the OpenPGP standard. It is used for manually encrypting and decrypting individual files, making it ideal for secure storage of specific documents or for secure file transfers, but not for transparent, system-level encryption.
+```bash
+# Read-only Linux templates for a known authorized LUKS device/mapping.
+cryptsetup luksDump /dev/example-encrypted-device
+cryptsetup status example-mapping
+# Do not print passphrases, volume keys, or recovery material into notes/logs.
+# luksFormat and erase are destructive operations, not inspection commands.
+```
 
-Understanding the distinction between block-level and file-level encryption is crucial. FDE with LUKS protects the entire system when it is powered off, but once the system is booted and the LUKS volume is unlocked, the data is accessible. File-based encryption like `fscrypt` or GPG can provide an additional layer of security, keeping specific files or directories encrypted even when the user is logged in. A comprehensive data protection strategy often involves a combination of both.
+A header backup can retain an older keyslot capable of unlocking the same volume key. Removing a passphrase from the current header does not retroactively invalidate every historical header backup. Design credential revocation, backup retention, and any required volume-key reencryption together. Test restoration on disposable data, not the only production copy.
 
-### Linux Encryption Cheat Sheet
+!!! info "External Resources"
+    - [cryptsetup Key Management and LUKS Metadata](https://man7.org/linux/man-pages/man8/cryptsetup.8.html) (cryptsetup)
+    - [LUKS Header Backup Security](https://man7.org/linux/man-pages/man8/cryptsetup-luksHeaderBackup.8.html) (cryptsetup)
+    - [fscrypt Threat Model and Key Availability](https://docs.kernel.org/filesystems/fscrypt.html) (Linux kernel)
 
-| Technology | Type | Granularity | Common Use Case | Key Tool(s) |
-| :--- | :--- | :--- | :--- | :--- |
-| **LUKS** | Full-Disk (FDE) | Block Device / Partition | Encrypting entire OS or data drives. | `cryptsetup` |
-| **fscrypt** | Filesystem-Level | Per-directory | Encrypting user home directories (`/home/user`). | `fscrypt` |
-| **GnuPG (GPG)** | File-Based | Per-file | Securely storing or transferring individual files. | `gpg` |
-| **eCryptfs** | Filesystem-Level | Per-file (legacy) | Older home directory encryption schemes. | `ecryptfs-utils` |
+## Running Hosts, Cloud Volumes, and Secrets
 
-!!! info "External Resources for Deep Dive"
-    *   **Arch Wiki - dm-crypt/Encrypting an entire system:** [https://wiki.archlinux.org/title/Dm-crypt/Encrypting_an_entire_system](https://wiki.archlinux.org/title/Dm-crypt/Encrypting_an_entire_system) (A comprehensive, technical guide to setting up LUKS for full-disk encryption).
-    *   **`fscrypt` Documentation:** [https://github.com/google/fscrypt](https://github.com/google/fscrypt) (The official documentation and source code for the `fscrypt` tool and library).
-    *   **The GNU Privacy Handbook:** [https://www.gnupg.org/gph/en/gnupg.html](https://www.gnupg.org/gph/en/gnupg.html) (A detailed manual for using GnuPG for file encryption, signing, and more).
+```text
+Stolen encrypted volume + no usable key -> offline contents can remain protected
+Running host + open mapping + process permitted to read -> plaintext available
+Cloud volume encryption + overly privileged workload IAM -> service reads can still succeed
+# Storage encryption, OS permissions, workload identity, and key-policy scope differ.
+```
+
+Unlocked fscrypt directories are likewise subject to the key and filesystem threat model; encryption is not automatic isolation from every process under the same identity. Protect keys from process memory/core dumps, uncontrolled backups, and overly broad access. Cloud-managed encryption adds KMS/IAM/service trust rather than eliminating key management.
+
+Use independent application/file encryption where the data-owner/recipient model requires it, but account for where plaintext is processed. Memory-resident secrets and already-copied plaintext cannot be revoked by changing only a disk passphrase.

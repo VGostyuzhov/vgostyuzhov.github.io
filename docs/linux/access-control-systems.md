@@ -1,85 +1,70 @@
 # Access Control Systems
 
----
+Linux can apply multiple checks to one operation. DAC/ACL permission, process capabilities, mandatory policy, mount restrictions, and syscall filtering answer different questions; an allow at one layer does not cancel a denial at another.
 
-# Discretionary Access Control (DAC)
+## Discretionary Access Control and ACLs
 
-## Basics and Core Concepts
+A process carries real/effective user and group IDs plus supplementary groups. Filesystem checks normally use filesystem credentials derived from them. Linux POSIX-style ACLs extend owner/group/other access with named users/groups and a **mask** limiting the group-class permissions. They are not an arbitrary ordered Windows-style deny/allow list.
 
-Discretionary Access Control (DAC) is an access control model where the **owner** of an object (e.g., a file or directory) has the discretion to determine the access permissions for other subjects (e.g., users or groups). This model is identity-centric, meaning access rights are bound to the identity of the subject. The creator of an object is its initial owner, and this owner can grant or revoke privileges to others.
+For a typical access ACL: an owner match uses the owner entry; a named-user match uses that entry limited by the mask; applicable group entries are evaluated within the group class and mask; other applies when the earlier identity classes do not match. A named-user match does not fall back to more generous other permissions. Capabilities and MAC checks can further change the result.
 
-Traditional Unix permissions are a classic implementation of DAC. Every file and directory has three sets of permissions defined for three classes of users: the **owner** (u), the **group** (g), and **others** (o). Each set defines three permissions: **read (r)**, **write (w)**, and **execute (x)**. These are commonly represented by a 9-character string (e.g., `rwxr-xr--`) or an octal number (e.g., `754`). The `chmod` command modifies these permissions, while `chown` and `chgrp` change the user and group ownership.
+```text
+# Synthetic getfacl excerpt; Alice is a named user, NOT the file owner:
+# owner: bob
+# group: reports
+user::rw-
+user:alice:rw-          # effective:r-- because mask removes write
+group::r--
+mask::r--
+other::---
+# Alice's named rw- entry does not supply effective write access.
+```
 
-Special permission bits modify the standard behavior.
+```bash
+# Read-only inspection; getfacl displays effective mask restrictions.
+getfacl /srv/reports/monthly.txt
+id alice
+namei -l /srv/reports/monthly.txt
+# chmod of group-class bits on an extended ACL can change the ACL mask.
+# setfacl can recalculate it unless its options/configuration say otherwise.
+```
 
-* The **SUID (Set User ID)** bit (`s` in the owner's execute field) on an executable file causes it to run with the privileges of the file's owner, not the user who executed it (e.g., the `passwd` command running as root). 
-* The **SGID (Set Group ID)** bit (`s` in the group's execute field) on an executable makes it run with the file's group privileges. On a directory, SGID causes new files and subdirectories created within it to inherit the directory's group ownership, which is useful for shared project folders. 
-* The **Sticky Bit** (`t` in the others' execute field), when set on a directory (like `/tmp`), allows users to delete or rename files *only* if they are the owner of the file, the owner of the directory, or root, even if they have write permission to the directory.
-
-**Access Control Lists (ACLs)** extend the traditional Unix permission model. While standard permissions only define access for one owner, one group, and everyone else, ACLs provide a more granular mechanism. They allow the owner to grant or deny permissions for specific, additional users and groups. The `getfacl` command is used to view ACLs, and `setfacl` is used to modify them. A file with an ACL applied is often indicated by a `+` (plus sign) at the end of its permission string in the `ls -l` output.
-
-| Component | Symbolic | Octal | Description |
-| :--- | :--- | :--- | :--- |
-| **Permissions** | | | |
-| Read | `r` | `4` | View contents of a file; list contents of a directory. |
-| Write | `w` | `2` | Modify or delete a file; create or delete files in a directory. |
-| Execute | `x` | `1` | Run a file as a script/program; `cd` into a directory. |
-| No Permission | `-` | `0` | No access. |
-| **Special Bits** | | | |
-| SUID | `---s--` | `4000` | (Set User ID) Executable runs with file owner's privileges. |
-| SGID | `------s-` | `2000` | (Set Group ID) Executable runs with file group's privileges. / Files in dir inherit dir's group. |
-| Sticky Bit | `--------t` | `1000` | On directories, only the owner (or root) can delete/rename files. |
-| **Core Commands** | | | |
-| `chmod` | `chmod [u/g/o/a][+/-][r/w/x]` | `chmod [octal]` | Change permissions. (e.g., `chmod 755 file`, `chmod g+w file`) |
-| `chown` | `chown [user]:[group]` | | Change owner and/or group. (e.g., `chown user:group file`) |
-| `chgrp` | `chgrp [group]` | | Change group ownership. |
-| **ACL Commands** | | | |
-| `getfacl` | `getfacl [file]` | | View the Access Control List for a file. |
-| `setfacl` | `setfacl -m u:[user]:[rwx]` | | Modify (set) the ACL for a file. (e.Same syntax for `g:[group]`) |
+A directory **default ACL** supplies inherited access policy to newly created children; it does not retroactively update old files. Creation-mode restrictions still apply. Inspect both the parent's default ACL and the child's resulting access ACL.
 
 !!! info "External Resources"
-    - **Official Documentation/Guides:**
-        * [Access Control Lists in Linux](https://documentation.suse.com/sles/12-SP5/html/SLES-all/cha-security-acls.html) (SUSE Documentation)
-        * [What You Need To Know To Set Linux Permissions and Access Control Lists](https://www.comptia.org/en-us/blog/what-you-need-to-know-to-set-linux-permissions-and-access-control-lists) (CompTIA)
-    - **In-Depth Blog Posts:**
-        * [Linux File Permissions: Understanding Setuid, Setgid, and the Sticky Bit](https://www.cbtnuggets.com/blog/technology/system-admin/linux-file-permissions-understanding-setuid-setgid-and-the-sticky-bit) (CBT Nuggets)
-    - **Video Tutorials:**
-        * [YouTube - Linux ACLs Explained](https://www.youtube.com/watch?v=LnKoncbQBsM)
+    - [ACL Evaluation, Mask, and Inheritance](https://manpages.debian.org/trixie/acl/acl.5.en.html) (Linux manual)
+    - [Filesystem Credentials and Path Checks](https://man7.org/linux/man-pages/man7/path_resolution.7.html) (Linux man-pages)
 
----
+## Mandatory Access Control
 
-# Mandatory Access Control (MAC)
+**Linux Security Modules (LSMs)** provide kernel hooks for security mechanisms. SELinux uses labels/types and a loaded policy; AppArmor profiles constrain programs with rules including paths and capabilities. These controls can restrict operations by privileged processes when the relevant policy covers them. Not every process is necessarily confined: inspect labels/profiles, mode, and policy exceptions.
 
-## Basics and Core Concepts
+| Concept | SELinux | AppArmor |
+|---|---|---|
+| Subject policy | Process security context/domain | Applied process profile |
+| File policy | Object labels and type rules | Path-mediated profile rules under its semantics |
+| Active enforcement | Enforcing with applicable domain policy | Enforce mode with applicable profile |
+| Observation mode | Permissive logs denials without enforcing them | Complain mode generally logs would-be violations; explicit deny behavior differs |
+| Investigation | Contexts, AVC denials, persistent labeling rules | Applied profile, logs, intended paths and permissions |
 
-Mandatory Access Control (MAC) is an access control model where the operating system constrains the ability of a subject (e.g., a process) to access or perform operations on an object (e.g., a file). Unlike Discretionary Access Control (DAC), where owners can set permissions, MAC policies are centrally managed by an administrator and enforced by the kernel. Access decisions are made by a **Reference Monitor** (like the Linux Security Modules - LSM) by comparing security labels of the subject and object against a system-wide policy.
+SELinux contexts include user, role, type, and optionally multi-level security (MLS) levels or multi-category security (MCS) categories. **Type enforcement** determines permitted domain/type operations. **MCS categories** can separate container labels where the policy and runtime configure them; a container label alone is not proof that all paths are covered.
 
-SELinux (Security-Enhanced Linux) is a label-based MAC implementation. Every subject and object on the system is assigned a **security context** (e.g., `user:role:type:level`). The core of SELinux policy is **Type Enforcement (TE)**, which defines allowed interactions between types (e.g., `allow httpd_t var_www_t:file { read }`). Its policy is monolithic, loaded into the kernel, and can operate in `enforcing`, `permissive`, or `disabled` modes. AppArmor, by contrast, is a path-based MAC system. It uses **profiles** (plain text files) that are bound to specific executable paths (e.g., `/usr/sbin/sshd`) and define what file system paths and capabilities that application can access.
+## Investigate a Denial Before Widening Policy
 
-The SELinux context often includes components for **Role-Based Access Control (RBAC)** and **Multi-Level/Category Security (MLS/MCS)**. RBAC limits user privileges based on their assigned role (e.g., `web_admin_r`). MLS provides a hierarchical security model (e.g., `Unclassified` < `Secret`) based on the Bell-LaPadula model, enforcing "no read up" and "no write down" rules. MCS is a non-hierarchical extension that uses categories (e.g., `s0:c1,c2`) to provide compartmentalization, which is widely used to isolate containers.
+Suppose a service can read Unix-mode permissions on a newly mounted data directory but receives `EACCES` under SELinux. Determine the actual process context, target label, operation, and Access Vector Cache (AVC) denial event. A wrong filesystem label may need a supported persistent labeling fix, rather than a new allow rule for an unintended type. DAC failure can also occur before an expected MAC denial appears.
 
-Policy development and debugging are critical skills. For SELinux, policy is written in TE or CIL (Common Intermediate Language). Debugging relies on parsing `type=AVC` (Access Vector Cache) denial messages from `/var/log/audit/audit.log` using `ausearch`. The `audit2allow` utility can read these denials and suggest new `allow` rules. For AppArmor, profiles are developed manually or with tools like `aa-genprof`. Debugging is done in `complain` mode, with denials logged to `kern.log` or `auditd`, and the `aa-logprof` tool is used to interactively review and approve or deny behaviors.
+```bash
+# SELinux lab host only; read-only diagnosis (privileges may be required).
+getenforce
+ps -eZ
+ls -Zd /srv/app /srv/app/data
+ausearch -m AVC -ts recent
+# Logs can include sensitive paths/arguments; restrict their distribution.
+# Do not automatically install every rule suggested by audit2allow.
+```
 
-# #Cheatsheet: MAC Concepts & Implementations
+Review whether the operation belongs in the service contract, fix configuration/labels first, then add the narrow required policy if justified. Disabling enforcement globally can restore functionality by removing a boundary and is not a demonstrated fix. AppArmor requires the same reasoning with its applied profile and path rules.
 
-| Concept | SELinux (Label-Based) | AppArmor (Path-Based) |
-| :--- | :--- | :--- |
-| **Core Unit** | Security Context (`user:role:type:level`) | Profile (per-executable path) |
-| **Policy Logic** | Type Enforcement (TE). Rules on *types*. | Path-based rules. `allow /var/www/ r`. |
-| **Enforcement** | Kernel (LSM). Enforces on all objects. | Kernel (LSM). Enforces on profiled apps. |
-| **Modes** | `enforcing`, `permissive`, `disabled` | `enforce`, `complain`, `disabled` |
-| **Denial Log** | `/var/log/audit/audit.log` (`type=AVC`) | `/var/log/kern.log` or `auditd` |
-| **Debug Tool** | `ausearch`, `audit2allow`, `sealert` | `aa-logprof`, `aa-complain` |
-| **Models** | Supports TE, RBAC, MLS, MCS | Focuses on application confinement |
-
-## External Resources for Deep Dive
-
-!!! info "External Resources for Deep Dive"
-    * **Official Documentation & Wikis:**
-        * [SELinux Project Wiki](https://selinuxproject.org/page/Main_Page): The central hub for SELinux documentation, architecture explanations, and news.
-        * [AppArmor Wiki](https://gitlab.com/apparmor/apparmor/-/wikis/home): The official GitLab wiki for AppArmor, containing documentation on profile creation, kernel interfaces, and utilities.
-        * [Red Hat Enterprise Linux (RHEL) SELinux Guide](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/using_selinux): A comprehensive and practical guide covering SELinux policy, modes, and troubleshooting.
-
-    * **In-Depth Articles & Tutorials:**
-        * [Red Hat Blog: MCS and Containers](https://www.redhat.com/en/blog/multi-category-security-mcs-selinux-and-containers): A detailed technical blog post explaining the practical application of MCS with SELinux for container isolation.
-        * [Ubuntu Tutorial: AppArmor Profile Development](https://ubuntu.com/tutorials/apparmor-profile-development): A hands-on tutorial for creating and debugging AppArmor profiles from scratch.
+!!! info "External Resources"
+    - [SELinux Modes, Labeling, and Troubleshooting](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/index) (Red Hat)
+    - [AppArmor Profile Language](https://manpages.ubuntu.com/manpages/noble/en/man5/apparmor.d.5.html) (AppArmor manual)

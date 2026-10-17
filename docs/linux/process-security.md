@@ -1,118 +1,104 @@
-## Process Security
+# Process Security
 
-### Basics and Core Concepts
+A process's authority includes its user/group credentials, namespaces, capabilities, open descriptors, applied mandatory policy, and inherited runtime state. Non-root execution is useful but does not summarize all of that authority.
 
-**Process Isolation and Sandboxing**
-Process isolation ensures that processes operate in separate **virtual address spaces**, preventing them from accessing each other's memory or interfering with execution. This is enforced by the kernel via **Memory Management Units (MMU)** and protection rings (Ring 0 for kernel, Ring 3 for user). Modern sandboxing extends this by virtualizing system resources to limit a compromised process's blast radius. **Linux Namespaces** (e.g., PID, NET, MNT) provide an isolated view of the system, while **Seccomp-BPF** (Secure Computing Mode) restricts the **system calls** a process can make, effectively reducing the kernel attack surface.
+## Credentials, Capabilities, and Execution
 
-**Resource Limits and Quotas**
-Unchecked resource consumption can lead to **Denial of Service (DoS)** attacks or system instability (e.g., "fork bombs"). Administrators enforce limits using **`ulimit`** (user-level shell limits) and **PAM** (`/etc/security/limits.conf`) to restrict open file descriptors, stack size, and process counts. For more granular control, **Control Groups (cgroups)** manage resource allocation (CPU, memory, I/O) for collections of processes. Cgroups are the fundamental mechanism behind container resource limiting, ensuring that a single application cannot starve the host or other containers.
+**Capabilities** divide privileged operations into kernel-defined permissions. Relevant sets include **effective** (used for current checks), **permitted** (available to make effective), **inheritable**, **ambient** (propagated across qualifying execution), and the **bounding set** (constrains capabilities obtainable through file execution). Their interaction at exec matters; a bit's presence does not grant unlimited power across all user namespaces.
 
-**Process Monitoring and Auditing**
-Effective detection requires immutable logging of process behavior and system calls. The **Linux Audit Framework (`auditd`)** is the standard subsystem for this, allowing administrators to write rules that intercept and log specific syscalls (e.g., `execve`, `connect`, `open`) and file access events. This data is critical for **forensic analysis** and identifying **Indicators of Compromise (IoC)**. Advanced monitoring often employs **eBPF** (Extended Berkeley Packet Filter) tools, which allow for high-performance, programmable tracing of kernel events with minimal system overhead.
+**no_new_privs** prevents exec from gaining privilege through mechanisms such as set-ID/file capabilities. It does not remove current capabilities, undo writable mounts, revoke cloud credentials, or stop every service-level privilege change. Set it together with a narrow capability policy and the rest of the service's confinement.
 
-**Signal Handling and IPC Security**
-**Inter-Process Communication (IPC)** mechanisms—such as shared memory, pipes, message queues, and sockets—bypass process isolation to allow data exchange. Security here relies on strict **Access Control Lists (ACLs)** and proper permission bits (mode) on IPC objects to prevent unauthorized read/write access. **Signals** (asynchronous notifications like `SIGTERM`) require careful handling; poorly designed signal handlers can introduce **race conditions** or reentrancy vulnerabilities. Secure design dictates authenticating the other party (e.g., checking `SO_PEERCRED` in Unix sockets) before processing data.
+```bash
+# Read-only checks on an authorized Linux process and executable.
+target_pid=1234
+sed -n '/^Uid:/p; /^Gid:/p; /^Groups:/p; /^Cap/p; /^NoNewPrivs:/p; /^Seccomp/p' /proc/$target_pid/status
+getcap /usr/local/bin/app  # File capabilities can differ from running process state.
+# Resolve hex capability bits with the platform's capability tooling when available.
+```
 
----
+!!! info "External Resources"
+    - [Capability Sets, Exec, and Namespaces](https://man7.org/linux/man-pages/man7/capabilities.7.html) (Linux man-pages)
+    - [No New Privileges](https://docs.kernel.org/userspace-api/no_new_privs.html) (Linux kernel)
 
-### Cheatsheet: Process Security Mechanisms
+## Sandboxing a systemd Service
 
-| Feature | Primary Tool / Mechanism | Security Goal | Key Risk Mitigated |
-| :--- | :--- | :--- | :--- |
-| **Memory Isolation** | Virtual Memory / ASLR / DEP | Confidentiality & Integrity | Buffer overflows affecting other processes |
-| **System View Isolation** | Namespaces (PID, NET, MNT) | Isolation | Container breakouts / Information Disclosure |
-| **Attack Surface Reduction**| Seccomp-BPF | Least Privilege | Kernel exploitation via syscalls |
-| **Resource Control** | Cgroups / `ulimit` | Availability | Denial of Service (DoS) / Fork bombs |
-| **Auditing** | `auditd` / `auditctl` / eBPF | Non-repudiation | Unnoticed privilege escalation / Malware execution |
-| **IPC Control** | DAC Permissions / SELinux | Access Control | Unauthorized data injection or snooping |
+For a system service on supported systemd/Linux versions (per-user services have different support/privilege constraints), directives can reduce privileges and writable paths without pretending that the application is bug-free. The following is a **drop-in fragment**, not a complete runnable service; it assumes an installed `app.service` whose identity, executable, and required files are already defined.
 
----
+```ini
+[Service]
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+StateDirectory=study-app
+# ProtectSystem makes the service's filesystem view largely read-only.
+# StateDirectory provides its managed writable state path under /var/lib.
+MemoryHigh=192M
+MemoryMax=256M
+TasksMax=64
+```
 
-### External Resources for Deep Dive
+`PrivateTmp` changes the service's temporary-directory view; it does not authorize access to arbitrary host files or block network connections. `ProtectSystem` does not make every host filesystem globally read-only, and other mounts/writable exceptions matter. Inspect effective configuration and test required/rejected operations under the deployed version.
 
-!!! info "Essential Reading"
-    * **[Docker Docs: Isolation with Namespaces and Cgroups](https://docs.docker.com/engine/security/userns-remap/)**
-        * *Context*: Although focused on Docker, this is the canonical explanation for how modern Linux process isolation functions (Namespaces) and resource limiting (Cgroups) work in practice.
-    * **[Red Hat: System Auditing with Auditd](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/security_guide/chap-system_auditing)**
-        * *Context*: The official documentation for the Linux Audit framework, covering rule creation (`auditctl`), log analysis, and configuration for compliance.
-    * **[Seccomp Security Profiles for Docker](https://docs.docker.com/engine/security/seccomp/)**
-        * *Context*: A practical look at how Seccomp filters are applied to restrict system calls, including standard profiles used in production environments.
-    * **[Beej's Guide to Unix IPC](https://beej.us/guide/bgipc/)**
-        * *Context*: A classic, technical deep-dive into the implementation details of IPC (signals, pipes, sockets), critical for understanding the developer's perspective on securing these channels.
+```bash
+systemctl cat app.service
+systemctl show app.service -p User -p NoNewPrivileges -p CapabilityBoundingSet -p MemoryMax -p TasksMax
+systemd-analyze security app.service  # Heuristic review, not a proof of confinement.
+```
 
-### Practical Labs & Commands
+!!! info "External Resources"
+    - [systemd Execution Sandboxing](https://manpages.debian.org/bookworm/systemd/systemd.exec.5.en.html) (systemd)
+    - [systemd Resource Controls](https://manpages.debian.org/bookworm/systemd/systemd.resource-control.5.en.html) (systemd)
 
-**1. Resource Limiting (Mitigating Fork Bombs)**
-Demonstrate how to prevent Denial of Service via process exhaustion using `ulimit` (shell-level) and `systemd` (cgroup-level).
+## Resource Limits and cgroup v2
 
-* **Check current limits:**
-    ```bash
-    ulimit -a
-    ```
-* **Set a restrictive process limit (Session only):**
-    This limits the user to 10 processes, effectively neutralizing a fork bomb in this session.
-    ```bash
-    ulimit -u 10
-    ```
-* **Ephemeral Cgroup Limit (Systemd):**
-    Run a process with a hard memory cap using systemd scopes.
-    ```bash
-    # Runs 'stress' with a 50MB memory limit. OOM killer triggers if exceeded.
-    systemd-run --scope -p MemoryMax=50M stress --vm 1 --vm-bytes 100M
-    ```
+A shell's `ulimit` configures inherited resource limits, not every daemon/container on the machine. `RLIMIT_NPROC` counts processes/threads against a real UID under its rules and has privileged exemptions; a very low interactive limit can break ordinary sessions. PAM limits apply only where the application opens the relevant PAM session. A systemd service can have different limits from your shell.
 
-**2. Process Isolation (Namespaces)**
-Use `unshare` to manually create Linux namespaces, mimicking how containers (like Docker) work under the hood.
+**cgroup v2** applies controller policy to groups of processes. `memory.high` induces reclaim/throttling pressure; `memory.max` is a hard boundary that can cause cgroup OOM handling. An OOM kill is a result to investigate, not automatic evidence of an attack. `pids.max` counts tasks, including threads, and an ancestor cgroup can impose a tighter aggregate boundary than the workload's own setting. A cgroup namespace changes the exposed view rather than automatically setting a new resource limit. `pids.events` can supply evidence of rejected creation under the controller. CPU quotas throttle rather than guaranteeing a request's latency. Kernel/controller enablement, hierarchy, swap policy, and unbounded workloads still affect the host.
 
-* **Create a shell in a new Network and PID namespace:**
-    ```bash
-    # --net: New network stack (will see only loopback)
-    # --pid: New PID namespace (process usually becomes PID 1 inside)
-    # --fork --mount-proc: Remount /proc to reflect the new namespace
-    sudo unshare --net --pid --fork --mount-proc /bin/bash
-    ```
-* **Verify Isolation:**
-    Inside the new shell, run `ps aux` (you should only see a few processes) and `ip a` (you should not see the host's network interfaces).
+```text
+Pod/container memory.max=256MiB; application attempts sustained 400MiB use
+-> reclaim/limit pressure -> allocation failure or OOM handling under kernel policy
+# Memory limit != safe request size; page cache and other charged memory also matter.
+# CPU/memory limits do not automatically constrain every node resource or network path.
+```
 
-**3. System Call Tracing (Attack Surface Analysis)**
-Use `strace` to audit exactly which system calls a binary uses. This is the first step in building a **Seccomp** whitelist profile.
+!!! info "External Resources"
+    - [cgroup v2 Controllers and Memory Events](https://docs.kernel.org/admin-guide/cgroup-v2.html) (Linux kernel)
+    - [Resource Limit Scope and Exemptions](https://man7.org/linux/man-pages/man2/getrlimit.2.html) (Linux man-pages)
 
-* **Trace specific calls (File Open & Network Connect):**
-    ```bash
-    # -e trace=... : Filter specific syscalls
-    # -f : Follow child processes (forks)
-    strace -f -e trace=openat,connect,execve curl [http://example.com](http://example.com)
-    ```
-    *Interview Context*: You would analyze this output to determine that `curl` requires `connect`, but perhaps not `listen` or `accept`, allowing you to block those calls in production.
+## Monitoring and IPC
 
-**4. System Auditing (Auditd)**
-Configure the kernel audit subsystem to log unauthorized access to a sensitive file.
+Virtual memory separation allows deliberate sharing through IPC. For a Unix-domain connection, inspect peer credentials under the appropriate namespace model and authorize the requested operation. Knowing that a caller runs as a service UID does not authorize every file or action. Tracing/ptrace access is separately constrained by credentials, dumpability, LSM policy, and namespaces.
 
-* **Create a temporary watch rule:**
-    ```bash
-    # -w: Watch file
-    # -p wa: Trigger on Write (w) or Attribute change (a)
-    # -k key_name: Tag for searching later
-    sudo auditctl -w /etc/passwd -p wa -k identity_changes
-    ```
-* **Trigger and Search:**
-    Touch the file (simulating access) and search the logs.
-    ```bash
-    sudo touch /etc/passwd
-    sudo ausearch -k identity_changes
-    ```
+```bash
+# Read-only inspection; no process environment or memory dump is printed.
+ps -eo pid,ppid,user,group,comm
+ss -lxnp  # Visibility depends on privilege and namespace.
+# Tracing a live service can perturb it and expose secrets; use a controlled fixture.
+strace -f -e trace=openat,connect,execve /usr/bin/true
+```
 
-**5. IPC Analysis**
-Inspect current Inter-Process Communication facilities to identify open shared memory segments or message queues.
+Use [audit and monitoring](logging-monitoring.md) for event retention and limitations. A seccomp filter constrains reachable syscalls; a successful trace of one execution is not a sufficient regression suite for a production filter.
 
-* **List active IPC facilities:**
-    ```bash
-    ipcs -a
-    ```
-* **View detailed info on a specific Process ID:**
-    Check `/proc` to see environment variables and status of a running process (e.g., PID 1234).
-    ```bash
-    cat /proc/1234/environ  # Check for leaked secrets in env vars
-    cat /proc/1234/status   # Check Seccomp status and Capabilities
-    ```
+## Diagnose Container Termination
+
+An exit code reported as 137 commonly represents termination by SIGKILL (`128 + 9`); it does not identify who sent the signal or prove an OOM kill. Compare the runtime's termination reason, cgroup memory-event counters, kernel/node logs, and orchestrator events in the same time interval. Counters aggregate events over a cgroup lifetime; a nonzero value from earlier is not proof about this particular restart.
+
+Kubernetes memory **requests** influence scheduling and memory **limits** constrain applicable runtime usage; a request is not a hard cap. Node-pressure eviction is a separate kubelet decision from a process killed under a memory cgroup limit. Restart policy and controllers determine what runs afterward. Do not infer malicious resource use or a universally correct new limit from one numeric exit code.
+
+```bash
+# Authorized Kubernetes lab: inspect existing evidence, do not generate memory pressure.
+kubectl -n study describe pod app
+kubectl -n study logs app --previous
+# On a Linux host, inspect the matching actual cgroup path and time window.
+cat /sys/fs/cgroup/example/memory.events
+cat /sys/fs/cgroup/example/pids.events
+# Paths are placeholders; correlate with the intended container, not an unrelated group.
+```
+
+!!! info "External Resources"
+    - [Kubernetes Resource Requests and Limits](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/) (Kubernetes)
+    - [Node-Pressure Eviction](https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/) (Kubernetes)

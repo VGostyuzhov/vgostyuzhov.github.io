@@ -1,90 +1,85 @@
-# VM and Container Security: A Study Guide
+# VM and Container Security
 
-## Container Security
+A Linux container is a set of processes configured through kernel/runtime mechanisms, not a separate guest kernel. A VM supplies a guest kernel behind a virtual-machine boundary. Both need protection of management interfaces, credentials, shared resources, and updates.
 
-### Linux Container Isolation
-Containers are not "real" objects in the Linux kernel; they are a collection of processes isolated using several distinct kernel features.
+## Namespaces and User IDs
 
-#### 1. Namespaces
-Namespaces wrap a global system resource in an abstraction that makes it appear to the processes within the namespace that they have their own isolated instance of the resource.
+Namespaces change views of selected resources. A mount namespace changes visible mounts; a PID namespace changes process numbering/visibility; a network namespace changes the network stack. A user namespace maps IDs and scopes relevant capability checks. None of these automatically removes sensitive host mounts, inherited descriptors, service sockets, or all kernel vulnerabilities.
 
-- **PID:** Isolates process IDs. Processes in a namespace cannot see or signal processes outside.
-- **NET:** Isolates network interfaces, IP addresses, routing tables, and firewall rules.
-- **MNT:** Isolates mount points. A container has its own view of the file system.
-- **UTS:** Isolates hostname and NIS domain name.
-- **IPC:** Isolates Inter-Process Communication (System V IPC, POSIX message queues).
-- **USER:** Isolates user and group IDs. A user can be `root` (UID 0) inside a container but a non-privileged user on the host.
-- **CGROUP:** Isolates the view of control groups.
+```bash
+# Read-only Linux inspection of an authorized process.
+target_pid=1234
+readlink /proc/$target_pid/ns/user
+readlink /proc/$target_pid/ns/mnt
+readlink /proc/$target_pid/ns/pid
+cat /proc/$target_pid/uid_map
+cat /proc/$target_pid/gid_map
+# UID 0 inside a user namespace can map to an unprivileged host UID.
+# Inspect the mapping; UID 0 text alone does not identify host authority.
+```
 
-#### 2. Control Groups (cgroups)
-While namespaces provide isolation (what you can see), cgroups provide resource management (how much you can use).
-
-- **Resource Limiting:** Limits on CPU, memory, I/O, and network bandwidth.
-- **Prioritization:** Giving more CPU/bandwidth to certain containers.
-- **Accounting:** Measuring how many resources a container is using.
-- **Control:** Freezing and restarting groups of processes.
-- **Security Impact:** Prevents "noisy neighbor" attacks and DoS by resource exhaustion.
-
-#### 3. Linux Capabilities
-Capabilities break down the power of the `root` user into smaller, distinct privileges. By default, containers should drop as many as possible.
-
-- **CAP_CHOWN:** Make arbitrary changes to file UIDs and GIDs.
-- **CAP_NET_ADMIN:** Perform various network-related operations (e.g., interface config, firewall).
-- **CAP_SYS_ADMIN:** The "new root" - a catch-all for many privileged operations. **Highly dangerous.**
-- **CAP_SYS_PTRACE:** Trace arbitrary processes using `ptrace`.
-
-### Hardening with LSMs and Seccomp
-Standard permissions are often insufficient for container isolation. Mandatory Access Control (MAC) and system call filtering add essential layers.
-
-#### 1. Seccomp (Secure Computing Mode)
-Seccomp allows a process to transition into a state where it cannot make any system calls except for a very limited set (like `read`, `write`, `exit`, `sigreturn`).
-
-- **Seccomp-BPF:** A more flexible version that uses BPF filters to allow/deny syscalls based on arguments.
-- **Default Profiles:** Docker and Kubernetes provide default seccomp profiles that block ~44 dangerous syscalls (e.g., `mount`, `reboot`, `ptrace`).
-
-#### 2. AppArmor and SELinux
-These Linux Security Modules (LSMs) provide fine-grained control over what processes can do.
-
-- **AppArmor:** Path-based MAC. It uses profiles to restrict what files a process can read/write and what capabilities it can use.
-- **SELinux:** Label-based MAC. Every object (file, process, socket) has a security label. Rules define which labels can interact.
-
-### Container Escaping Techniques
-An "escape" occurs when a process inside a container gains access to the host system.
-
-1. **Privileged Containers:** Running with `--privileged` gives the container nearly all host capabilities and access to all devices in `/dev`.
-2. **Docker Socket Mounting:** Mounting `/var/run/docker.sock` allows a container to talk to the Docker daemon and start new, privileged containers.
-3. **Kernel Exploits:** Since containers share the host kernel, any kernel vulnerability (e.g., "Dirty Cow") can be used to escape.
-4. **Misconfigured Mounts:** Mounting sensitive host paths (like `/etc`, `/root`, or `/proc`) can lead to privilege escalation.
-5. **CAP_SYS_ADMIN:** Granting this capability is often enough to perform a mount-based escape or use `nsenter` to enter other namespaces.
-
-## Virtual Machine Security
-
-Virtual Machines run a full guest OS on a hypervisor. In the Linux ecosystem, **KVM** (Kernel-based Virtual Machine) is the primary technology.
-
-### Hypervisors and Isolation
-
-- **KVM:** A kernel module that turns the Linux kernel into a Type 1 hypervisor. It uses hardware extensions (Intel VT-x, AMD-V) to provide isolation.
-- **Hyperjacking:** A theoretical attack where a rogue hypervisor is installed beneath a running OS.
-- **VM Escape:** The most critical threat. An attacker exploits a vulnerability in the hypervisor (or virtualized hardware like QEMU) to break out of the guest and execute code on the host.
-
-### Side-Channel Attacks
-Because VMs share physical hardware (especially CPU caches and branch predictors), they are vulnerable to side-channel attacks.
-
-- **Spectre and Meltdown:** Exploit speculative execution to leak data across process or VM boundaries.
-- **L1 Terminal Fault (L1TF):** Leaks data from the L1 cache.
-- **Mitigation:** Requires kernel patches (e.g., KPTI), microcode updates, and sometimes disabling Hyper-Threading (SMT).
-
-## VM vs. Container Security Cheat Sheet
-
-| Concern | Container Security | VM Security |
-| :--- | :--- | :--- |
-| **Primary Threat** | Kernel exploit leading to host compromise. | VM escape via hypervisor vulnerability. |
-| **Isolation Level** | Weaker (shared kernel, namespaces). | Stronger (separate guest OS and kernel). |
-| **Resource Control** | cgroups (soft/hard limits). | Hypervisor (strict allocation). |
-| **Key Hardening** | Drop capabilities, Seccomp, AppArmor/SELinux. | Keep hypervisor patched, Secure Boot. |
-| **Fatal Misconfiguration** | `--privileged` mode; mounting Docker socket. | Exposing management interface. |
+An ancestor PID namespace can see descendants; a child view is not a symmetric host-security guarantee. Shared/inherited namespaces, hostPID/hostNetwork, mount propagation, and privileged APIs change the boundary. A chroot changes pathname roots but is not a standalone sandbox for privileged code.
 
 !!! info "External Resources"
-    *   **Linux Namespaces Man Page:** [https://man7.org/linux/man-pages/man7/namespaces.7.html](https://man7.org/linux/man-pages/man7/namespaces.7.html)
-    *   **KVM Security Overview:** [https://www.linux-kvm.org/page/Security](https://www.linux-kvm.org/page/Security)
-    *   **NSA/CISA Kubernetes Hardening Guide:** [https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
+    - [Namespace Types and Membership](https://man7.org/linux/man-pages/man7/namespaces.7.html) (Linux man-pages)
+    - [User Namespace Mappings and Capability Scope](https://man7.org/linux/man-pages/man7/user_namespaces.7.html) (Linux man-pages)
+
+## Controls That Must Be Combined
+
+| Mechanism | Restriction | What it does not establish |
+|---|---|---|
+| Namespaces | Selected resource views | Permission to use every exposed object |
+| cgroups | Enabled resource-controller limits/accounting | General network policy or complete DoS prevention |
+| Capabilities | Specific privileged kernel operations | Safety merely because the process is non-root |
+| Seccomp | Reachable syscalls/argument predicates | Path-aware authorization or a separate kernel |
+| SELinux/AppArmor | Applicable mandatory confinement | Coverage of unconfined processes or every misconfigured path |
+| Read-only root | Writes through container root filesystem | Read-only mounted volumes, no writable memory, or no network access |
+
+cgroup v2 does not supply a universal built-in network-bandwidth controller; traffic shaping and network policy require the appropriate additional mechanisms. A kernel bug must be reachable and exploitable under the actual configuration to enable escape; “any kernel vulnerability escapes every container” is false. A runtime daemon socket with broad administrative authority can expose the host regardless of how non-root the application otherwise appears. Mounting the socket path read-only does not turn its protocol into a read-only API: a process that can connect may still ask the daemon to perform a mutating operation. The daemon's authorization, not the mount label alone, governs that delegated operation.
+
+!!! info "External Resources"
+    - [cgroup v2 Controller Scope](https://docs.kernel.org/admin-guide/cgroup-v2.html) (Linux kernel)
+    - [Seccomp Filtering Is Not a Complete Sandbox](https://docs.kernel.org/userspace-api/seccomp_filter.html) (Linux kernel)
+    - [Docker Daemon Attack Surface](https://docs.docker.com/engine/security/) (Docker)
+
+## Kubernetes Workload Settings and Host Exposure
+
+The following **Pod-spec fragment** assumes a supported Linux Kubernetes/runtime setup; it is not a complete deployable manifest. The application must tolerate a read-only root and have separately defined writable data/temporary volumes where necessary.
+
+```yaml
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+containers:
+  - name: app
+    image: example.invalid/study-app:fixture
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: [ALL]
+```
+
+`runAsNonRoot` does not revoke filesystem access already granted to that UID/groups or cloud credentials exposed to it. `allowPrivilegeEscalation: false` controls no_new_privs under supported conditions; it is not a replacement for dropping existing privilege. `RuntimeDefault` requests the runtime's profile, not one fixed Kubernetes syscall deny-list. Actual enforcement depends on the runtime, kernel, workload configuration, and admission policy. Privileged workloads have important exceptions; do not assume the fragment overrides a privileged host-level deployment.
+
+Kubernetes **Pod Security Standards Restricted** is an admission-policy baseline, not a complete workload-hardening configuration. For example, a read-only root filesystem is useful hardening but is not itself required by Restricted. It also does not establish network segmentation or per-resource application authorization. Define those separately.
+
+A writable hostPath or node-management socket can expose host data/control. `fsGroup` can grant volume access through group/ownership behavior where supported; it does not mean non-root code is unable to read every mounted secret. Inspect actual mount permissions and the volume driver's behavior before concluding that storage is isolated.
+
+!!! info "External Resources"
+    - [Kubernetes Security Context Semantics](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/) (Kubernetes)
+    - [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) (Kubernetes)
+    - [Linux Kernel Controls for Pods](https://kubernetes.io/docs/concepts/security/linux-kernel-security-constraints/) (Kubernetes)
+
+## Virtual Machines and Shared Hardware
+
+KVM relies on the Linux kernel and CPU virtualization support; userspace device models such as QEMU are part of the attack surface. A guest can attack interfaces it is exposed to, including device emulation, shared filesystems, or agents. Minimize unnecessary devices/channels, patch host kernel/hypervisor/device models, and constrain management interfaces and identities.
+
+VM isolation does not remove CPU side channels or host exhaustion. Spectre/Meltdown/L1TF mitigations depend on the specific vulnerability, CPU, kernel/hypervisor, microcode, and deployment requirements; KPTI or disabling SMT is not a universal fix for all speculative-execution issues. Test the vendor-supported mitigation set and capacity impact. Secure Boot validates an applicable boot trust chain; it is not proof that a running guest or host remains uncompromised.
+
+!!! info "External Resources"
+    - [KVM Security and Vulnerability Reporting](https://www.linux-kvm.org/page/Security) (KVM)
+    - [Hardware Vulnerability Mitigations](https://docs.kernel.org/admin-guide/hw-vuln/index.html) (Linux kernel)

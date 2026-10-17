@@ -69,6 +69,7 @@ nav:
     - Logging & Monitoring: linux/logging-monitoring.md
     - CLI Tools: linux/cli-tools.md
     - VM & Container Security: linux/vm-container-sec.md
+    - Tricky Interview Questions: linux/interview-questions.md
   - Active Directory & Windows:
     - windows-ad/index.md
     - Attack Techniques: windows-ad/attacks.md

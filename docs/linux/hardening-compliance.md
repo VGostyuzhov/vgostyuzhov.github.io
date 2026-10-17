@@ -1,29 +1,36 @@
-# Linux Hardening and Compliance: A Study Guide
+# Linux Hardening and Compliance
 
-This guide details the practice of system hardening and compliance for Linux environments. Hardening involves reducing a system's vulnerability by minimizing its attack surface, while compliance ensures the system adheres to established security standards.
+A hardening baseline specifies selected configuration expectations for a distribution/version and workload role. A compliance result is evidence about those checks, not proof that software, identities, application logic, and every runtime path are secure.
 
-## Basics and Core Concepts
+## Tailor the Baseline to the Host Role
 
-System hardening is a proactive security measure guided by fundamental principles like the **Principle of Least Privilege**, which dictates that any user, program, or process should have only the bare minimum privileges necessary to perform its function. Another key principle is **service minimization**, which involves disabling or uninstalling all non-essential services and applications to reduce potential entry points for an attacker. These principles work together to create a more resilient and defensible system.
+A Kubernetes node, developer workstation, database VM, and public web host need different services, privileges, mounts, and recovery paths. Record the versioned CIS/STIG or internal profile, control objective, expected evidence, and explicitly approved exceptions. Blindly disabling forwarding or writable paths can break a node while leaving the actual workload exposure unresolved.
 
-Rather than relying on ad-hoc configurations, hardening should follow established industry frameworks. The most recognized standards are the **CIS (Center for Internet Security) Benchmarks** and the **DISA STIGs (Security Technical Implementation Guides)** from the U.S. Department of Defense. These benchmarks provide detailed, prescriptive checklists for securing various Linux distributions. Automated tools like **OpenSCAP** can be used to scan a system's configuration and report on its compliance with these standards, identifying deviations that need to be remediated.
+**Mandatory policy** only confines operations covered by the loaded SELinux/AppArmor configuration and enforcement mode. Read [MAC diagnosis](access-control-systems.md#mandatory-access-control) before treating “package installed” or “SELinux enabled” as complete coverage. Likewise, filesystem/sysctl controls need actual mount/process/kernel verification.
 
-Key areas for hardening include the filesystem, kernel, and access controls. Securing the filesystem involves creating separate partitions for critical directories (`/tmp`, `/home`, `/var`) and applying restrictive mount options (`nodev`, `nosuid`, `noexec`) in `/etc/fstab` to limit the potential for privilege escalation. The kernel's behavior can be tuned for security using `sysctl.conf` to mitigate network-based attacks by, for example, enabling SYN cookies to counter SYN floods or randomizing memory layout (`kernel.randomize_va_space`) to make buffer overflow attacks more difficult.
+!!! info "External Resources"
+    - [CIS Benchmarks and Platform Profiles](https://www.cisecurity.org/cis-benchmarks/) (CIS)
+    - [Security Content Automation and Assessment](https://www.open-scap.org/tools/openscap-base/) (OpenSCAP)
 
-Finally, a critical component of a hardened system is a **Mandatory Access Control (MAC)** framework like **SELinux** or **AppArmor**. Unlike traditional Discretionary Access Control (DAC), MAC systems enforce a system-wide policy that confines every process, including `root`, to a limited set of actions and resources. SELinux (used in RHEL-based systems) and AppArmor (used in Debian/Ubuntu) provide an essential layer of defense against privilege escalation and are a cornerstone of modern Linux security.
+## Work One Finding Through to Evidence
 
-### Linux Hardening Cheat Sheet
+```text
+Finding: web worker can write a root-executed helper's configuration
+Threat: service compromise changes what a privileged scheduled task executes
+Correction: remove unintended write path; retain only required service state storage
+Positive test: intended reporting job still completes
+Negative test: web worker cannot modify helper/config/parent dependency paths
+Rollout: canary, review denied operations, then expand
+Exception: documented owner/scope/expiry if a temporary compatibility gap remains
+# A scanner finding closes only when the intended boundary is tested, not just renamed.
+```
 
-| Hardening Area | Technique | Description & Keywords | Key Tools/Files |
-| :--- | :--- | :--- | :--- |
-| **Filesystem** | Separate Partitions | Isolate key directories like `/tmp`, `/var` to prevent system-wide impact. | `/etc/fstab` |
-| | Restrictive Mounts | Use `nodev`, `nosuid`, `noexec` options to limit risks. | `/etc/fstab` |
-| **Services** | Minimize Attack Surface | Disable or uninstall all unnecessary services (e.g., `cups`). | `systemctl` |
-| **Kernel Tuning** | `sysctl` Hardening | Mitigate network attacks and improve memory security. | `/etc/sysctl.conf` |
-| **Access Control**| Mandatory Access Control | Enforce strict confinement of processes, even `root`. | SELinux, AppArmor |
-| **Compliance** | Automated Scanning | Scan system against a security baseline (e.g., CIS). | OpenSCAP |
+For service confinement, compare the current unit, effective runtime credentials and mounts, and [systemd sandbox settings](process-security.md#sandboxing-a-systemd-service). `systemd-analyze security` provides a heuristic configuration review. A favorable score cannot establish whether the application should read a mounted credential, whether a network route is allowed, or whether external IAM grants are excessive.
 
-!!! info "External Resources for Deep Dive"
-    *   **CIS Benchmarks:** [https://www.cisecurity.org/cis-benchmarks/](https://www.cisecurity.org/cis-benchmarks/) (Industry-standard configuration guidelines for hardening a wide variety of systems).
-    *   **DISA STIGs:** [https://public.cyber.mil/stigs/](https://public.cyber.mil/stigs/) (Security Technical Implementation Guides from the U.S. Department of Defense).
-    *   **OpenSCAP Project:** [https://www.open-scap.org/](https://www.open-scap.org/) (An open-source framework for automated vulnerability scanning and compliance checking).
+## Fleet Rollout, Updates, and Reassessment
+
+Use reproducible images/configuration, canary hosts, functional/negative tests, measured failures, and rollback/recovery. Track policy drift without automatically overwriting an intentional exception. Where remediation restarts a service or reboots a node, handle workload draining, quorum, and availability under the orchestrator's supported workflow.
+
+Patch activation has multiple layers: update the node OS and running kernel, rebuild affected container images, deploy replacements, and restart still-running vulnerable processes as required. A kernel package installed on disk does not prove the active kernel was changed; a rebuilt image does not replace every running pod. See [package activation](package-management.md#verify-a-running-deployment).
+
+Keep exceptions narrow, owned, time-bounded, and linked to compensating controls with observable evidence. Reassess after distribution/runtime/kernel changes rather than treating a once-passing report as permanent assurance.

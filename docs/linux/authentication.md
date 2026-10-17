@@ -1,54 +1,55 @@
 # Authentication and Directory Services
 
-## Local Authentication
+Linux login depends on the application and configured identity/authentication sources. Finding a user, verifying a credential, deciding account eligibility, opening a session, and authorizing a particular operation are separate steps.
 
-### Basics and Core Concepts
+## PAM and Local Authentication
 
-**Pluggable Authentication Modules (PAM)** provide a dynamic authorization mechanism for applications and services in Linux environments. PAM decouples the task of authentication from the application, allowing administrators to configure authentication policies without modifying application source code. Configurations are typically stored in `/etc/pam.d/` and define a stack of modules managed by four management groups: `auth` (identity verification), `account` (authorization/validity), `password` (credential updates), and `session` (environment setup/teardown). Control flags (e.g., `required`, `requisite`, `sufficient`) determine how the failure or success of a module affects the overall result.
+**Pluggable Authentication Modules (PAM)** let participating applications invoke configurable authentication/account/session functions. It is not a universal packet or syscall authorization layer. A service that does not use PAM does not inherit its stack merely because the files exist.
 
-**Password Storage and Hashing** is a critical defense against offline attacks and credential dumping. Passwords must never be stored in cleartext; instead, they should be hashed using slow, iterative algorithms designed to resist GPU-accelerated brute-force and rainbow table attacks. Modern standards mandate the use of algorithms such as Argon2id, bcrypt, or scrypt, combined with a unique, random salt per user. Deprecated algorithms like MD5, SHA-1, or standard SHA-256 (without aggressive iteration counts) are considered insufficient for password storage due to their speed, which benefits attackers.
+| PAM group | Decision | Example distinction |
+|---|---|---|
+| `auth` | Verify authentication evidence | Password or configured second factor |
+| `account` | Account eligibility | Expiry/access conditions, not every file's authorization |
+| `password` | Credential changes | Hashing and password-update checks |
+| `session` | Session setup/cleanup | Limits, audit context, environment under configured modules |
 
-**Multi-Factor Authentication (MFA)** augments security by requiring at least two of the three authentication factors: something you know (password), something you have (hardware token, smartphone), or something you are (biometrics). Implementation methods vary from Time-based One-Time Passwords (TOTP) and HMAC-based One-Time Passwords (HOTP) to stronger cryptographic proofs like FIDO2/WebAuthn. While SMS and email-based MFA provide a layer of defense, they are susceptible to SIM swapping and interception; hardware keys and FIDO2 are preferred for high-security environments due to their resistance to phishing and man-in-the-middle (MitM) attacks.
+A `required` module failure is remembered while processing continues; `requisite` failure returns early; `sufficient` success can end that stack successfully if earlier required failures do not prevent it. Includes and extended controls change the full path. A multi-factor authentication (MFA) module after an earlier short-circuit success may never run. Validate the actual service's complete stack with permitted success/failure/recovery cases before changing a login path.
 
-**Key-based Authentication**, predominantly used in SSH (Secure Shell), relies on asymmetric cryptography (public-private key pairs) rather than shared secrets like passwords. The public key is placed in the target system's `~/.ssh/authorized_keys` file, while the private key remains secured on the client. This method mitigates brute-force attacks against passwords and enables automated, non-interactive logins. Security best practices for key-based auth include disabling root login, strictly limiting file permissions on key files, protecting private keys with passphrases, and disabling password authentication entirely in the `sshd_config`.
+```text
+# Conceptual flow, not a PAM configuration to paste:
+auth module A: sufficient + success -> may return success before later auth module B
+later MFA module B                 -> cannot protect a path that never invokes it
+# Required account/session processing still depends on application calls/configuration.
+```
+
+Linux password-verifier algorithms depend on the distribution's PAM/libcrypt support and configured parameters; yescrypt and SHA-512-crypt are examples, not equivalent to a single fast SHA-512 digest. Do not prescribe Argon2/bcrypt as a universal `pam_unix` setting based on web-application password advice. A salt prevents shared precomputation; cost parameters increase guessing cost. Protect shadow data and recovery even with a suitable verifier.
+
+!!! info "External Resources"
+    - [PAM Stack and Control Syntax](https://man7.org/linux/man-pages/man5/pam.d.5.html) (Linux-PAM)
+    - [pam_unix Algorithms and Account Checks](https://man7.org/linux/man-pages/man8/pam_unix.8.html) (Linux-PAM)
+
+## SSH User Authentication and Host Identity
+
+An SSH client verifies the server's **host key**; the server separately verifies the user's key/certificate or other configured evidence. Public-key login proves control of a private-key capability but does not automatically require two factors. Hardware-backed keys with appropriate verification can supply stronger properties; mere use of a public key does not imply phishing resistance for every session/recovery path.
+
+```bash
+# Read-only validation on an authorized host; sshd may need privileges/config access.
+sshd -t  # Syntax check: does not prove Match blocks enforce the intended user policy.
+sshd -T -C user=alice,host=client.example,addr=192.0.2.8
+# Inspect authenticationmethods, pubkeyauthentication, passwordauthentication,
+# kbdinteractiveauthentication, usepam, permitrootlogin, and applicable Match effects.
+```
+
+Disabling `PasswordAuthentication` alone does not establish that keyboard-interactive/PAM cannot accept a password. To require a key plus a second method, configure supported `AuthenticationMethods` and the matching backend, then test both missing-factor cases and a successful full flow. Keep a verified recovery route while rolling out changes. Restrict forwarded-agent use, key scope, and authorized-key options where appropriate.
+
+Locking a Unix password does not necessarily revoke SSH keys, existing sessions, sudo shells, directory tickets, or cloud credentials. See [account lifecycle](user-management.md#accounts-and-running-credentials) and [session lifecycle](../authentication/sessions.md).
+
+!!! info "External Resources"
+    - [sshd_config Authentication Methods and Match Rules](https://man.openbsd.org/sshd_config) (OpenSSH)
+    - [SSH Host-Key Checking](https://man.openbsd.org/ssh_config#StrictHostKeyChecking) (OpenSSH)
 
 ## Directory Integration
 
-### Basics and Core Concepts
+NSS resolves identities; authentication can involve PAM/SSSD, LDAP, or Kerberos under the deployment's configuration. Cached directory information and offline authentication can affect how quickly removal takes effect. Identify the application's lookup/cache/session behavior instead of promising immediate offboarding from a directory update alone.
 
-**LDAP (Lightweight Directory Access Protocol)** is the industry standard for accessing and maintaining distributed directory information services. For a detailed breakdown of LDAP security and threats, see **[Directory Services](../authentication/directory-services.md)**.
-
-**Kerberos** is a network authentication protocol using "tickets" to prove identity. It requires strict time synchronization (NTP) and supports mutual authentication. For a deep dive into Kerberos flows and attacks (like Kerberoasting), see **[Directory Services](../authentication/directory-services.md)**.
-
-**Active Directory (AD)** is Microsoft's directory service utilizing LDAP, Kerberos, and DNS. AD security relies on managing Group Policy Objects (GPO) and monitoring for "Pass-the-Hash" or "Golden Ticket" attacks.
-
-**Identity Federation** enables Single Sign-On (SSO) across distinct security domains using standards like **[SAML](../authentication/saml.md)**, **[OIDC](../authentication/oauth2-oidc.md)**, and OAuth 2.0. Security relies on the trust relationship (PKI/Certificate exchange) between the Identity Provider (IdP) and Service Provider (SP).
-
-### Summary Cheatsheet
-
-| Concept | Protocol/Port | Key Component | Primary Security Risk |
-| :--- | :--- | :--- | :--- |
-| **[LDAP](../authentication/directory-services.md)** | TCP 389 / 636 | Directory Tree (DIT) | Cleartext transmission, Injection |
-| **[Kerberos](../authentication/directory-services.md)** | TCP/UDP 88 | KDC (AS + TGS) | Time drift, Golden Tickets |
-| **SSH Keys** | TCP 22 | Pub/Priv Key Pair | Private key theft, weak permissions |
-| **[SAML](../authentication/saml.md)** | HTTPS 443 | XML Assertions | XML Signature Wrapping, XXE |
-| **[OIDC](../authentication/oauth2-oidc.md)** | HTTPS 443 | JSON Tokens (JWT) | Token leakage, weak signing |
-| **PAM** | N/A (Local Lib) | `libpam`, Stack Config | Flag misuse (e.g., `sufficient`) |
-| **Hashing** | N/A (Compute) | Salt + Iterations | Fast hashes (MD5, SHA-1) |
-
-!!! info "External Resources for Deep Dive"
-
-    * **NIST Special Publication 800-63B** - *Digital Identity Guidelines: Authentication and Lifecycle Management.* The authoritative standard for MFA, password requirements, and identity proofing.
-        [https://pages.nist.gov/800-63-3/sp800-63b.html](https://pages.nist.gov/800-63-3/sp800-63b.html)
-
-    * **Red Hat Enterprise Linux Security Guide: Using PAM** - *Official Documentation.* detailed breakdown of PAM configuration syntax, module types, and control flags.
-        [https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/configuring_and_managing_authentication_services/pluggable-authentication-modules-pam_configuring-and-managing-authentication-services](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/configuring_and_managing_authentication_services/pluggable-authentication-modules-pam_configuring-and-managing-authentication-services)
-
-    * **OWASP Password Storage Cheat Sheet** - *Practical Guide.* Best practices for choosing hashing algorithms, salting, and work factors.
-        [https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
-
-    * **Explain Like I'm 5: Kerberos** - *Conceptual Deep Dive.* A highly regarded technical explanation of the Kerberos handshake and ticket exchange process.
-        [https://www.roguelynn.com/words/explain-like-im-5-kerberos/](https://www.roguelynn.com/words/explain-like-im-5-kerberos/)
-
-    * **Auth0: SAML vs. OIDC** - *Comparison Guide.* A technical comparison of federation protocols, helpful for understanding when to use XML-based vs. JSON-based assertions.
-        [https://auth0.com/intro-to-iam/saml-vs-openid-connect-oidc/](https://auth0.com/intro-to-iam/saml-vs-openid-connect-oidc/)
+Use [Directory Services](../authentication/directory-services.md) for LDAP binds and Kerberos tickets, and [OIDC](../authentication/oauth2-oidc.md) or [SAML](../authentication/saml.md) for application federation. Federation trust requires recipient/issuer/request validation and lifecycle policy, not merely exchanging certificates.
